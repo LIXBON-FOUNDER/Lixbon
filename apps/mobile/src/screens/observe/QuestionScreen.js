@@ -1,5 +1,7 @@
+import { TEXT } from '../../theme';
+import { TextInput } from '../../components/Typography';
 import React, { useEffect, useRef, useState } from 'react';
-import { TextInput, View } from 'react-native';
+import {  View } from 'react-native';
 
 import { useDialogs } from '../../components/dialogs';
 import { PillButton, useColors } from '../../components/ui';
@@ -134,7 +136,7 @@ export default function QuestionScreen({ obs, route }) {
               value={drafts[key] || ''}
               onChangeText={(text) => setDrafts((previous) => ({ ...previous, [key]: text }))}
               style={{ minHeight: 88, padding: 12, textAlignVertical: 'top', color: colors.ink,
-                backgroundColor: colors.surface2, fontFamily: FONTS.ui, fontSize: 16, borderRadius: RADIUS }}
+                backgroundColor: colors.surface2, fontFamily: FONTS.ui, fontSize: TEXT.body, borderRadius: RADIUS }}
             />
             <PillButton label="Revisar y enviar" style={{ minHeight: 48 }} disabled={!canSend || !drafts[key]?.trim()} onPress={() => send(question, key)} />
           </View>

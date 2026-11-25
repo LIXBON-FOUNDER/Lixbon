@@ -1,9 +1,11 @@
+import { TEXT } from '../theme';
+import { Text, TextInput } from '../components/Typography';
 // SettingsScreen.js — Ajustes en secciones: perfil (abre su hoja), plan,
 // apariencia, chat, privacidad, desarrolladores y sesión y datos. Las acciones
 // delicadas piden confirmación, y eliminar la cuenta se hace manteniendo pulsado.
 import Constants from 'expo-constants';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Animated, Easing, Linking, Pressable, ScrollView,   View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ApiException } from '../api';
@@ -126,10 +128,10 @@ export default function SettingsScreen({ onBack, onNavigate }) {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <Avatar name={fullName || email} size={52} uri={avatarUri(api.base, user)} />
               <View style={{ flex: 1, gap: 3 }}>
-                <Text numberOfLines={1} style={{ fontFamily: FONTS.serif, fontSize: 21, lineHeight: 26, color: c.ink }}>
+                <Text numberOfLines={1} style={{ fontFamily: FONTS.serif, fontSize: TEXT.empty, lineHeight: 26, color: c.ink }}>
                   {fullName || user.username || '—'}
                 </Text>
-                <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+                <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
                   {email}
                 </Text>
               </View>
@@ -138,7 +140,7 @@ export default function SettingsScreen({ onBack, onNavigate }) {
             {usage != null && (
               <View style={{ gap: 8 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.ink70 }}>Sesión actual</Text>
+                  <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink70 }}>Sesión actual</Text>
                   <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, color: c.inkMuted }}>{Math.round(usage * 100)} %</Text>
                 </View>
                 <Meter value={usage} color={usage >= 0.9 ? c.danger : c.accent} />
@@ -151,7 +153,7 @@ export default function SettingsScreen({ onBack, onNavigate }) {
               style={({ pressed }) => ({ marginTop: 8, minHeight: 40, paddingHorizontal: 14, borderRadius: RADIUS, backgroundColor: c.warnSoft, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.75 : 1 })}
             >
               <Icon name="mail" size={16} color={c.warn} />
-              <Text style={{ flex: 1, paddingVertical: 9, fontFamily: FONTS.ui, fontSize: 13.5, color: c.warn }}>Correo sin verificar · reenviar enlace</Text>
+              <Text style={{ flex: 1, paddingVertical: 9, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.warn }}>Correo sin verificar · reenviar enlace</Text>
             </Pressable>
           )}
         </FadeUp>
@@ -164,7 +166,7 @@ export default function SettingsScreen({ onBack, onNavigate }) {
         <Section title="Apariencia" delay={60}>
           <View style={{ minHeight: 56, paddingLeft: 14, paddingRight: 10, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <RowIcon name={prefs.themeMode === 'light' ? 'sun' : 'moon'} />
-            <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}>Tema</Text>
+            <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}>Tema</Text>
             <Segmented
               value={prefs.themeMode}
               onChange={prefs.setThemeMode}
@@ -224,7 +226,7 @@ function Field({ label, children }) {
   const c = useColors();
   return (
     <View style={{ gap: 6 }}>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.ink70 }}>{label}</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink70 }}>{label}</Text>
       {children}
     </View>
   );
@@ -298,7 +300,7 @@ function ProfileSheet({ onDone }) {
           style={({ pressed }) => ({ height: 36, paddingHorizontal: 12, borderRadius: RADIUS_SM, backgroundColor: pressed ? c.surface5 : c.surface4, flexDirection: 'row', alignItems: 'center', gap: 8 })}
         >
           <Icon name="image" size={16} color={c.inkBody} />
-          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.ink }}>{busy ? 'Subiendo…' : 'Cambiar foto'}</Text>
+          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{busy ? 'Subiendo…' : 'Cambiar foto'}</Text>
         </Pressable>
       </View>
       <Field label="Nombre y apellido">
@@ -318,26 +320,26 @@ function ProfileSheet({ onDone }) {
             borderColor: focused ? c.accent : 'transparent',
             backgroundColor: c.surface4,
             fontFamily: FONTS.ui,
-            fontSize: 15,
+            fontSize: TEXT.body,
             color: c.ink,
           }}
         />
       </Field>
       <Field label="Correo">
         <View style={{ height: 48, paddingHorizontal: 14, borderRadius: RADIUS, backgroundColor: c.surface3, justifyContent: 'center' }}>
-          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 15, color: c.inkMuted }}>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.inkMuted }}>
             {email}
           </Text>
         </View>
         <Pressable onPress={changePassword} hitSlop={8} style={{ alignSelf: 'flex-start', marginTop: 4 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkBody }}>Cambiar contraseña</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>Cambiar contraseña</Text>
         </Pressable>
       </Field>
       <Pressable
         onPress={save}
         style={({ pressed }) => ({ height: 50, borderRadius: RADIUS, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', transform: [{ scale: pressed ? 0.98 : 1 }] })}
       >
-        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.onPrimary }}>Guardar</Text>
+        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.body, color: c.onPrimary }}>Guardar</Text>
       </Pressable>
     </View>
   );
@@ -397,7 +399,7 @@ function DeleteAccountSheet({ planName, onCancel }) {
         {lost.map((item) => (
           <View key={item} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <Icon name="x" size={16} color={c.danger} strokeWidth={1.8} />
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkBody }}>{item}</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>{item}</Text>
           </View>
         ))}
       </View>
@@ -410,7 +412,7 @@ function DeleteAccountSheet({ planName, onCancel }) {
         secureTextEntry
         autoCapitalize="none"
         accessibilityLabel="Contraseña"
-        style={{ height: 48, paddingHorizontal: 14, borderRadius: RADIUS, backgroundColor: c.surface4, fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}
+        style={{ height: 48, paddingHorizontal: 14, borderRadius: RADIUS, backgroundColor: c.surface4, fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}
       />
       <Pressable
         onPressIn={press}
@@ -423,14 +425,14 @@ function DeleteAccountSheet({ planName, onCancel }) {
         <Animated.View
           style={{ position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: c.danger, width: fill.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }}
         />
-        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: holding || busy ? c.onAccent : c.danger }}>
+        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.body, color: holding || busy ? c.onAccent : c.danger }}>
           {busy ? 'Eliminando…' : 'Mantén pulsado para eliminar'}
         </Text>
       </Pressable>
       <Pressable onPress={onCancel} style={{ height: 44, alignItems: 'center', justifyContent: 'center', marginTop: -8 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.ink70 }}>Cancelar</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink70 }}>Cancelar</Text>
       </Pressable>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 18, color: c.inkMuted, textAlign: 'center', marginTop: -12 }}>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: c.inkMuted, textAlign: 'center', marginTop: -12 }}>
         ¿Entraste con Google o Apple? Crea una contraseña desde «Cambiar contraseña» en tu perfil.
       </Text>
     </View>

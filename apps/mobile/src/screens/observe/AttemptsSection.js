@@ -1,3 +1,5 @@
+import { TEXT } from '../../theme';
+import { Text } from '../../components/Typography';
 // AttemptsSection.js — los intentos de una Task en su detalle (LXO-126, solo lectura).
 //
 // Lista compacta, no un árbol: una fila por intento con su número, proveedor, estado, edad y resultado. El que
@@ -5,7 +7,7 @@
 // con un filtro Todos / En curso / Terminados. Host y origen salen en cada fila solo si cambian entre intentos.
 // Tocar una fila abre ese intento: nunca se elige «el último» por el usuario.
 import React, { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable,  View } from 'react-native';
 
 import Icon from '../../components/Icon';
 import { Eyebrow, Segmented, useColors } from '../../components/ui';
@@ -36,23 +38,23 @@ export function AttemptRow({ item, now, showPlace, highlighted, onOpen }) {
     >
       <View style={{ flex: 1, gap: 3 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>
+          <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>
             {`Intento ${item.n ?? '?'} · ${item.provider}`}
           </Text>
-          {item.current ? <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 11.5, color: c.inkMuted }}>ACTUAL</Text> : null}
+          {item.current ? <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, color: c.inkMuted }}>ACTUAL</Text> : null}
         </View>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
           {[item.model, item.at ? ageText(item.at, now) : null, item.result?.text].filter(Boolean).join(' · ') || 'sin resultado todavía'}
         </Text>
         {showPlace ? (
-          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkFaint }}>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkFaint }}>
             {`${item.host ? `En ${item.host}` : 'Host desconocido'} · ${originText(item.origin)}`}
           </Text>
         ) : null}
         {flag ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Icon name={categoryOf(flag.category).icon} size={13} color={c.warn} />
-            <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.warn }}>
+            <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, color: c.warn }}>
               {item.attention.length === 1 ? categoryOf(flag.category).label : `${categoryOf(flag.category).label} y ${item.attention.length - 1} más`}
             </Text>
           </View>
@@ -93,8 +95,8 @@ export default function AttemptsSection({ attempts, now, onOpen }) {
                   <AttemptRow key={item.id} item={item} now={now} showPlace={m.showPlace} highlighted={item.id === m.relevantId} onOpen={onOpen} />
                 ))
               )}
-              {m.truncated ? <Body muted style={{ fontSize: 12.5 }}>{`Se ven los últimos ${m.counts.all}; los anteriores, en Lixbon Desktop.`}</Body> : null}
-              {attempts.attentionPartial && m.flaggedCount ? <Body muted style={{ fontSize: 12.5 }}>Atención: solo la más urgente, de la última sincronización.</Body> : null}
+              {m.truncated ? <Body muted style={{ fontSize: TEXT.meta }}>{`Se ven los últimos ${m.counts.all}; los anteriores, en Lixbon Desktop.`}</Body> : null}
+              {attempts.attentionPartial && m.flaggedCount ? <Body muted style={{ fontSize: TEXT.meta }}>Atención: solo la más urgente, de la última sincronización.</Body> : null}
             </>
           )}
         </>

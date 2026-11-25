@@ -1,3 +1,5 @@
+import { TEXT } from '../../theme';
+import { Text } from '../../components/Typography';
 import OpenOnDesktop from './OpenOnDesktop';
 // AttemptScreen.js — un intento (Attempt) de Supervisar (LXO-126, LXO-127; solo lectura).
 //
@@ -6,7 +8,7 @@ import OpenOnDesktop from './OpenOnDesktop';
 // es opaco y no llega), el Worktree (la ruta es ubicación, no identidad), los Artifacts, la revisión (vigente u
 // obsoleta, sin ambigüedad), su Attention y su Activity. Sin reanudar, lanzar, detener ni ver el diff.
 import React from 'react';
-import { Text, View } from 'react-native';
+import {  View } from 'react-native';
 
 import { Eyebrow, PillButton, useColors } from '../../components/ui';
 import { ageText, projectNames } from '../../observe/attention';
@@ -24,13 +26,13 @@ export function Field({ label, children, mono = false, secondary = false }) {
   const c = useColors();
   return (
     <View accessible accessibilityLabel={`${label}: ${typeof children === 'string' ? children : ''}`} style={{ flexDirection: 'row', gap: 12, minHeight: 28, alignItems: 'baseline' }}>
-      <Text style={{ width: 96, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{label}</Text>
+      <Text style={{ width: 96, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{label}</Text>
       {mono ? (
-        <Mono selectable numberOfLines={secondary ? 2 : 1} style={[{ flex: 1 }, secondary && { color: c.inkMuted, fontSize: 11.5 }]}>
+        <Mono selectable numberOfLines={secondary ? 2 : 1} style={[{ flex: 1 }, secondary && { color: c.inkMuted, fontSize: TEXT.meta }]}>
           {children}
         </Mono>
       ) : (
-        <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14, color: secondary ? c.inkMuted : c.inkBody }}>{children}</Text>
+        <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: secondary ? c.inkMuted : c.inkBody }}>{children}</Text>
       )}
     </View>
   );
@@ -68,7 +70,7 @@ export default function AttemptScreen({ obs, route }) {
             <Eyebrow>{taskTitle ? `Tarea · ${taskTitle}` : `Tarea ${m.taskId || unknown}`}</Eyebrow>
             <Title>{`Intento ${m.n ?? '?'}`}</Title>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
-              <StateText tone={m.status.tone}>{m.status.label}</StateText>
+              <StateText tone={m.status.tone} kind={m.status.raw === 'running' || m.status.raw === 'starting' ? 'working' : undefined}>{m.status.label}</StateText>
               {m.result ? <StateText tone={m.result.tone}>{m.result.text}</StateText> : null}
               {m.current === true ? <Body muted>El actual de su tarea</Body> : m.current === false ? <Body muted>No es el actual de su tarea</Body> : null}
             </View>
@@ -119,7 +121,7 @@ export default function AttemptScreen({ obs, route }) {
                 <Field label="Rama" mono>{m.worktree.branch || 'sin rama'}</Field>
                 {m.worktree.base ? <Field label="Base" mono>{m.worktree.base}</Field> : null}
                 <View accessible accessibilityLabel={`Estado: ${m.worktree.state.label}`} style={{ flexDirection: 'row', gap: 12, minHeight: 28, alignItems: 'center' }}>
-                  <Text style={{ width: 96, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>Estado</Text>
+                  <Text style={{ width: 96, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>Estado</Text>
                   <StateText tone={m.worktree.state.tone}>{m.worktree.state.label}</StateText>
                 </View>
                 <Field label="Procedencia">{m.worktree.provenance}</Field>
@@ -163,7 +165,7 @@ export default function AttemptScreen({ obs, route }) {
         ) : (
           t.attention.map((x) => <AttentionRow key={x.id} item={x} names={names} now={obs.now} onOpen={() => {}} inert />)
         )}
-        {t.attentionPartial && t.attention.length > 0 ? <Body muted style={{ fontSize: 12.5 }}>Solo las más urgentes, de la última sincronización.</Body> : null}
+        {t.attentionPartial && t.attention.length > 0 ? <Body muted style={{ fontSize: TEXT.meta }}>Solo las más urgentes, de la última sincronización.</Body> : null}
       </View>
 
       {t.capability ? (
@@ -181,13 +183,13 @@ export default function AttemptScreen({ obs, route }) {
                   </View>
                   <View style={{ flex: 1, gap: 2 }}>
                     <Body>{line.text}</Body>
-                    <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkFaint }}>{ageText(line.ts, obs.now)}</Text>
+                    <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkFaint }}>{ageText(line.ts, obs.now)}</Text>
                   </View>
                 </View>
               );
             })
           )}
-          {t.activity.error && t.activity.items.length ? <Body muted style={{ fontSize: 12.5 }}>No se pudo actualizar la actividad.</Body> : null}
+          {t.activity.error && t.activity.items.length ? <Body muted style={{ fontSize: TEXT.meta }}>No se pudo actualizar la actividad.</Body> : null}
           {t.activity.hasMore ? <PillButton outline label={t.activity.loading ? 'Cargando…' : 'Cargar anteriores'} onPress={t.more} disabled={t.activity.loading} /> : null}
         </View>
       ) : null}

@@ -1,3 +1,5 @@
+import { TEXT } from '../../theme';
+import { Text } from '../../components/Typography';
 import OpenOnDesktop from './OpenOnDesktop';
 // TaskScreen.js — Task Detail de Supervisar (LXO-110, solo lectura).
 //
@@ -7,7 +9,7 @@ import OpenOnDesktop from './OpenOnDesktop';
 // ficha de arriba es la del intento actual. Sin editor, terminal ni respuestas. Lo que habría que
 // hacer (responder, aprobar, revisar, reintentar, abrir en Desktop) sale deshabilitado y con su razón (LXO-46).
 import React from 'react';
-import { Text, View } from 'react-native';
+import {  View } from 'react-native';
 
 import Icon from '../../components/Icon';
 import { Eyebrow, PillButton, useColors } from '../../components/ui';
@@ -25,13 +27,13 @@ function Field({ label, children, mono = false, secondary = false }) {
   const c = useColors();
   return (
     <View accessible accessibilityLabel={`${label}: ${typeof children === 'string' ? children : ''}`} style={{ flexDirection: 'row', gap: 12, minHeight: 28, alignItems: 'baseline' }}>
-      <Text style={{ width: 96, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{label}</Text>
+      <Text style={{ width: 96, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{label}</Text>
       {mono ? (
-        <Mono selectable numberOfLines={secondary ? 2 : 1} style={[{ flex: 1 }, secondary && { color: c.inkMuted, fontSize: 11.5 }]}>
+        <Mono selectable numberOfLines={secondary ? 2 : 1} style={[{ flex: 1 }, secondary && { color: c.inkMuted, fontSize: TEXT.meta }]}>
           {children}
         </Mono>
       ) : (
-        <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14, color: secondary ? c.inkMuted : c.inkBody }}>{children}</Text>
+        <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: secondary ? c.inkMuted : c.inkBody }}>{children}</Text>
       )}
     </View>
   );
@@ -94,7 +96,7 @@ export default function TaskScreen({ obs, route }) {
             {actions.map((a) => (
               <View key={a.key} style={{ gap: 4 }} accessible accessibilityRole="button" accessibilityState={{ disabled: true }} accessibilityLabel={`${a.label}, no disponible. ${a.reason}`}>
                 <PillButton outline icon={a.icon} label={a.label} disabled onPress={() => {}} />
-                <Body muted style={{ fontSize: 12.5 }}>{a.reason}</Body>
+                <Body muted style={{ fontSize: TEXT.meta }}>{a.reason}</Body>
               </View>
             ))}
           </View>
@@ -108,7 +110,7 @@ export default function TaskScreen({ obs, route }) {
         ) : (
           t.related.map((a) => <AttentionRow key={a.id} item={a} names={names} now={obs.now} onOpen={() => {}} inert />)
         )}
-        {t.relatedPartial && t.related.length > 0 ? <Body muted style={{ fontSize: 12.5 }}>Solo las más urgentes, de la última sincronización.</Body> : null}
+        {t.relatedPartial && t.related.length > 0 ? <Body muted style={{ fontSize: TEXT.meta }}>Solo las más urgentes, de la última sincronización.</Body> : null}
       </View>
 
       <View style={{ gap: 8 }}>
@@ -127,13 +129,13 @@ export default function TaskScreen({ obs, route }) {
                 </View>
                 <View style={{ flex: 1, gap: 2 }}>
                   <Body>{line.text}</Body>
-                  <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkFaint }}>{ageText(line.ts, obs.now)}</Text>
+                  <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkFaint }}>{ageText(line.ts, obs.now)}</Text>
                 </View>
               </View>
             );
           })
         )}
-        {t.activity.error && t.activity.items.length ? <Body muted style={{ fontSize: 12.5 }}>No se pudo actualizar la actividad.</Body> : null}
+        {t.activity.error && t.activity.items.length ? <Body muted style={{ fontSize: TEXT.meta }}>No se pudo actualizar la actividad.</Body> : null}
         {t.activity.hasMore ? (
           <PillButton outline label={t.activity.loading ? 'Cargando…' : 'Cargar anteriores'} onPress={t.more} disabled={t.activity.loading} />
         ) : null}

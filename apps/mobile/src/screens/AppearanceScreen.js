@@ -1,8 +1,10 @@
+import { TEXT } from '../theme';
+import { Text } from '../components/Typography';
 // AppearanceScreen.js — Personalizar: una muestra del chat que cambia en vivo,
 // el color de acento, la lectura (tamaño y densidad) y los detalles de la
 // interfaz. Todo se aplica al instante; "Restablecer" vuelve a lo de fábrica.
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView,  View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Icon from '../components/Icon';
@@ -23,7 +25,7 @@ function Preview() {
       </Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <View style={{ height: 28, paddingHorizontal: 10, borderRadius: RADIUS_SM, justifyContent: 'center', backgroundColor: `rgba(${c.accentRgb},0.12)` }}>
-          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.accent }}>Web</Text>
+          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, color: c.accent }}>Web</Text>
         </View>
         <View style={{ flex: 1 }} />
         <View style={{ width: 32, height: 32, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center', backgroundColor: c.accent }}>
@@ -38,7 +40,7 @@ function Stacked({ title, children }) {
   const c = useColors();
   return (
     <View style={{ paddingVertical: 10, paddingHorizontal: 14, gap: 10 }}>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}>{title}</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}>{title}</Text>
       {children}
     </View>
   );
@@ -58,7 +60,7 @@ export default function AppearanceScreen({ onBack }) {
         onBack={onBack}
         right={
           <Pressable onPress={prefs.resetUi} style={({ pressed }) => ({ height: 44, paddingHorizontal: 12, borderRadius: RADIUS, justifyContent: 'center', backgroundColor: pressed ? c.pressed : 'transparent' })}>
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.ink70 }}>Restablecer</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink70 }}>Restablecer</Text>
           </Pressable>
         }
       />
@@ -67,8 +69,8 @@ export default function AppearanceScreen({ onBack }) {
 
         <FadeUp delay={40} style={{ gap: 10 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4 }}>
-            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.inkMuted }}>Color de acento</Text>
-            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.inkBody }}>{current.label}</Text>
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, color: c.inkMuted }}>Color de acento</Text>
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, color: c.inkBody }}>{current.label}</Text>
           </View>
           <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', gap: 8, padding: 12, borderRadius: RADIUS, backgroundColor: c.sheet }}>
             {ACCENTS.map((a) => {

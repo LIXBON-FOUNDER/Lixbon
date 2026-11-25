@@ -1,8 +1,10 @@
+import { TEXT } from '../theme';
+import { Text } from './Typography';
 // RemoteSessionList.js — filas de las sesiones remotas abiertas: el agente en
 // una ficha de 28px, título, de dónde viene y un punto que late mientras el
 // host está conectado. La usan el menú lateral y la sección Remoto.
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable,  View } from 'react-native';
 
 import { agentOf, isOnline, timeAgo } from '../remoteSessions';
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';
@@ -40,14 +42,14 @@ export function SessionRow({ session, active = false, onPress }) {
         backgroundColor: active ? c.surface3 : pressed ? c.pressed : 'transparent',
       })}
     >
-      <View style={{ width: 28, height: 28, borderRadius: RADIUS_SM, backgroundColor: a.soft, alignItems: 'center', justifyContent: 'center', opacity: online ? 1 : 0.6 }}>
+      <View style={{ width: 28, height: 28, borderRadius: RADIUS_SM, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', opacity: online ? 1 : 0.6 }}>
         <AgentMark agent={agent} size={agent === 'claude' ? 15 : 17} />
       </View>
       <View style={{ flex: 1, gap: 1 }}>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: online ? c.ink : c.inkBody }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: online ? c.ink : c.inkBody }}>
           {session.title || 'Sesión remota'}
         </Text>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
           {subtitle(session, a)}
         </Text>
       </View>

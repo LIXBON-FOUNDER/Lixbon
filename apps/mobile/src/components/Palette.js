@@ -1,9 +1,11 @@
+import { TEXT } from '../theme';
+import { Text, TextInput } from './Typography';
 // Palette.js — búsqueda global a pantalla completa: un campo para buscar o
 // preguntar, filtros (Todo · Conversaciones · Comandos · Preguntar) y, sin
 // texto, lo de siempre a mano: recientes, acciones con el tema en línea y
 // accesos. Con texto, conversaciones y comandos por coincidencia difusa.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { Animated, FlatList, Modal, Pressable,   View } from 'react-native';
 import { KeyboardController } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -187,7 +189,7 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
                   const first = results.find((r) => r.run);
                   if (first) pick(first);
                 }}
-                style={{ flex: 1, paddingVertical: 0, fontFamily: FONTS.ui, fontSize: 16, color: c.ink }}
+                style={{ flex: 1, paddingVertical: 0, fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}
               />
               {!!query && (
                 <Pressable onPress={() => setQuery('')} hitSlop={10} accessibilityLabel="Borrar búsqueda">
@@ -196,7 +198,7 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
               )}
             </View>
             <Pressable onPress={onClose} style={{ height: 48, paddingHorizontal: 10, justifyContent: 'center' }}>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.ink70 }}>Cancelar</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink70 }}>Cancelar</Text>
             </Pressable>
           </Animated.View>
 
@@ -213,7 +215,7 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 18, paddingBottom: 24 + insets.bottom }}
               ListEmptyComponent={
-                <Text style={{ paddingHorizontal: 12, fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>
+                <Text style={{ paddingHorizontal: 12, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>
                   {convs === null ? 'Cargando…' : filter === 'ask' ? 'Escribe tu pregunta arriba' : 'Nada coincide con tu búsqueda'}
                 </Text>
               }
@@ -225,7 +227,7 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
                   {item.kind === 'theme' ? (
                     <View style={{ height: 46, paddingLeft: 12, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                       <Icon name={c.dark ? 'moon' : 'sun'} size={18} color={c.inkSoft} />
-                      <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}>Tema</Text>
+                      <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}>Tema</Text>
                       <Segmented
                         size="sm"
                         bg={c.surface2}
@@ -277,10 +279,10 @@ function ResultRow({ item, onPress }) {
             <Icon name={item.icon || 'chevron-right'} size={18} color={c.inkSoft} />
           ))}
       </View>
-      <Text numberOfLines={ask ? 2 : 1} style={{ flex: 1, paddingVertical: ask ? 10 : 0, fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}>
+      <Text numberOfLines={ask ? 2 : 1} style={{ flex: 1, paddingVertical: ask ? 10 : 0, fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}>
         {ask ? `Preguntar: “${item.title}”` : item.title}
       </Text>
-      {!!item.detail && <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{item.detail}</Text>}
+      {!!item.detail && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{item.detail}</Text>}
       {ask && <Icon name="arrow-up" size={16} color={c.inkMuted} />}
     </Pressable>
   );

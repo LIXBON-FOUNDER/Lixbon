@@ -1,10 +1,13 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
+import { TEXT } from '../theme';
+import { Text, TextInput } from '../components/Typography';
 // ChatScreen.js — el chat a pantalla completa: cabecera (menú, título que abre
 // las acciones, nueva conversación), bienvenida con titular en serif y
 // sugerencias, hilo con fuentes y código, y el compositor con "+" (adjuntar y
 // búsqueda web), modelo y enviar.
 import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
-import { FlatList, Linking, Pressable, Text, TextInput, View } from 'react-native';
+import { FlatList, Linking, Pressable,   View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -230,11 +233,11 @@ function Hero({ firstName }) {
   const c = useColors();
   return (
     <FadeUp style={{ flex: 1, justifyContent: 'flex-end', gap: 10, paddingHorizontal: 24, paddingBottom: 22 }}>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>
         {greeting()}
         {firstName ? `, ${firstName}` : ''}
       </Text>
-      <ScreenTitle style={{ fontSize: 32, lineHeight: 36 }}>¿Qué investigamos hoy?</ScreenTitle>
+      <ScreenTitle style={{ fontSize: TEXT.title, lineHeight: 36 }}>¿Qué investigamos hoy?</ScreenTitle>
     </FadeUp>
   );
 }
@@ -261,7 +264,7 @@ function Starters({ onPick }) {
             })}
           >
             <Icon name={s.icon} size={18} color={c.accent} strokeWidth={1.7} />
-            <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 15, color: c.inkBody }}>{s.label}</Text>
+            <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.inkBody }}>{s.label}</Text>
             <Icon name="chevron-right" size={14} color={c.inkFaint} />
           </Pressable>
         </View>
@@ -315,13 +318,13 @@ function ConversationActions({ title, pinned, canCopy, onRename, onPick }) {
       })}
     >
       <Icon name={it.icon} size={19} color={danger ? c.danger : c.inkSoft} />
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 15, color: danger ? c.danger : c.ink }}>{it.label}</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.body, color: danger ? c.danger : c.ink }}>{it.label}</Text>
     </Pressable>
   );
   return (
     <View>
       <View style={{ marginTop: 8, marginBottom: 10, paddingHorizontal: 4, gap: 6 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>Título</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>Título</Text>
         <View style={{ height: 48, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 14, paddingRight: 12, borderRadius: RADIUS, backgroundColor: c.surface4 }}>
           <TextInput
             value={value}
@@ -331,7 +334,7 @@ function ConversationActions({ title, pinned, canCopy, onRename, onPick }) {
             returnKeyType="done"
             selectionColor={c.accent}
             accessibilityLabel="Título de la conversación"
-            style={{ flex: 1, paddingVertical: 0, fontFamily: FONTS.uiMedium, fontSize: 16, color: c.ink }}
+            style={{ flex: 1, paddingVertical: 0, fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}
           />
           <Icon name="pencil" size={16} color={c.inkMuted} />
         </View>
@@ -372,7 +375,7 @@ function AttachSheet({ onPick }) {
             })}
           >
             <Icon name={tile.icon} size={24} color={c.inkBody} />
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.ink }}>{tile.label}</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink }}>{tile.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -382,8 +385,8 @@ function AttachSheet({ onPick }) {
       >
         <Icon name="globe" size={22} color={chat.webSearch ? c.accent : c.inkSoft} />
         <View style={{ flex: 1, gap: 2 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}>Búsqueda web</Text>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>Busca en internet antes de responder</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}>Búsqueda web</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>Busca en internet antes de responder</Text>
         </View>
         <Toggle value={chat.webSearch} onChange={chat.setWebSearch} label="Búsqueda web" />
       </Pressable>
@@ -392,8 +395,8 @@ function AttachSheet({ onPick }) {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <Icon name="bolt" size={22} color={chat.razonar !== 'auto' && chat.razonar !== 'off' ? c.accent : c.inkSoft} />
             <View style={{ flex: 1, gap: 2 }}>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}>Razonamiento</Text>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}>Razonamiento</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
                 {chat.razonar === 'auto' || !chat.nivelesRazonar.includes(chat.razonar)
                   ? 'Razona solo cuando el mensaje lo pide'
                   : 'Más razonamiento, mejor en lo difícil pero tarda más'}
@@ -433,7 +436,7 @@ function Sources({ sources }) {
             style={({ pressed }) => [chip, { backgroundColor: pressed ? c.surface4 : c.surface2 }]}
           >
             {i === 0 && <Icon name="globe" size={13} color={c.inkMuted} />}
-            <Text numberOfLines={1} style={{ maxWidth: 160, fontFamily: FONTS.ui, fontSize: 12.5, color: c.ink70 }}>
+            <Text numberOfLines={1} style={{ maxWidth: 160, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink70 }}>
               {label}
             </Text>
           </Pressable>
@@ -441,7 +444,7 @@ function Sources({ sources }) {
       })}
       {!all && sources.length > 2 && (
         <Pressable onPress={() => setAll(true)} style={({ pressed }) => [chip, { backgroundColor: pressed ? c.surface4 : c.surface2 }]}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.ink70 }}>+{sources.length - 2}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink70 }}>+{sources.length - 2}</Text>
         </Pressable>
       )}
     </View>
@@ -498,7 +501,7 @@ function MessageList({ onCopy, onUserLongPress }) {
                   <View style={{ gap: 4, marginBottom: text ? 8 : 0 }}>
                     {files.map((f, i) => (
                       <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Icon name={f.kind === 'image' ? 'image' : 'file'} size={14} color={c.inkSoft} />
+                        <FileIcon nombre={f.name} size={24} color={c.inkSoft} />
                         <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: t(13), color: c.ink70 }}>
                           {f.name}
                         </Text>
@@ -507,7 +510,7 @@ function MessageList({ onCopy, onUserLongPress }) {
                   </View>
                 )}
                 {!!text && (
-                  <Text selectable style={{ fontFamily: FONTS.ui, fontSize: t(15), lineHeight: t(22.5), color: c.ink }}>
+                  <Text selectable style={{ fontFamily: FONTS.ui, fontSize: t(16), lineHeight: t(22.5), color: c.ink }}>
                     {text}
                   </Text>
                 )}
@@ -534,10 +537,10 @@ function MessageList({ onCopy, onUserLongPress }) {
               chat.webSearch ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Icon name="globe" size={15} color={c.inkMuted} />
-                  <ShimmerText text="Buscando en internet…" style={{ fontFamily: FONTS.ui, fontSize: 15 }} />
+                  <ShimmerText text="Buscando en internet…" style={{ fontFamily: FONTS.ui, fontSize: TEXT.body }} />
                 </View>
               ) : (
-                <ShimmerText text="Pensando…" style={{ fontFamily: FONTS.uiMedium, fontSize: 15 }} />
+                <ShimmerText text="Pensando…" style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body }} />
               )
             ) : null}
             {!!item.content && !working && (
@@ -567,7 +570,7 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
     <View style={{ paddingHorizontal: 12, paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 14) }}>
       {!!chat.quota && (
         <FadeUp style={{ marginBottom: 8, minHeight: 40, paddingLeft: 14, paddingRight: 6, borderRadius: RADIUS, backgroundColor: chat.quota.state === 'exhausted' ? c.dangerSoft : c.warnSoft, flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ flex: 1, paddingVertical: 8, fontFamily: FONTS.ui, fontSize: 13.5, color: chat.quota.state === 'exhausted' ? c.danger : c.warn }}>{chat.quota.message}</Text>
+          <Text style={{ flex: 1, paddingVertical: 8, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: chat.quota.state === 'exhausted' ? c.danger : c.warn }}>{chat.quota.message}</Text>
           <Pressable onPress={chat.clearQuota} accessibilityLabel="Cerrar aviso de cupo" style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="x" size={15} color={chat.quota.state === 'exhausted' ? c.danger : c.warn} />
           </Pressable>
@@ -575,7 +578,7 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
       )}
       {!!chat.error && (
         <FadeUp style={{ marginBottom: 8, minHeight: 40, paddingLeft: 14, paddingRight: 6, borderRadius: RADIUS, backgroundColor: c.dangerSoft, flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ flex: 1, paddingVertical: 8, fontFamily: FONTS.ui, fontSize: 13.5, color: c.danger }}>{chat.error}</Text>
+          <Text style={{ flex: 1, paddingVertical: 8, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.danger }}>{chat.error}</Text>
           <Pressable onPress={chat.clearError} accessibilityLabel="Cerrar aviso" style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="x" size={15} color={c.danger} />
           </Pressable>
@@ -601,7 +604,7 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
             paddingHorizontal: attachments.items.length ? 4 : 0,
             paddingVertical: 0,
             fontFamily: FONTS.ui,
-            fontSize: 15,
+            fontSize: TEXT.body,
             lineHeight: 22,
             color: c.ink,
           }}
@@ -629,7 +632,7 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
               backgroundColor: pressed ? c.pressed : 'transparent',
             })}
           >
-            <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: 13.5, color: c.ink70 }}>
+            <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink70 }}>
               {chat.model || 'Sin modelos'}
             </Text>
             <Icon name="chevron-down" size={14} color={c.ink70} strokeWidth={1.8} />
@@ -642,7 +645,7 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
               style={{ height: 30, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, borderRadius: RADIUS_SM, backgroundColor: `rgba(${c.accentRgb},0.12)` }}
             >
               <Icon name="globe" size={13} color={c.accent} strokeWidth={1.8} />
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>Web</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.accent }}>Web</Text>
             </Pressable>
           )}
 
@@ -653,7 +656,7 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
               style={{ height: 30, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, borderRadius: RADIUS_SM, backgroundColor: `rgba(${c.accentRgb},0.12)` }}
             >
               <Icon name="bolt" size={13} color={c.accent} strokeWidth={1.8} />
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{ETIQUETA_RAZONAR[chat.razonar]}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.accent }}>{ETIQUETA_RAZONAR[chat.razonar]}</Text>
             </Pressable>
           )}
 
@@ -702,7 +705,7 @@ function ContextLine({ used, total }) {
   const ratio = Math.min(1, used / total);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 24, paddingHorizontal: 6, marginTop: 4 }}>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: ratio >= 0.9 ? c.danger : c.inkMuted }}>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: ratio >= 0.9 ? c.danger : c.inkMuted }}>
         Contexto {thousands(used)} de {thousands(total)}
       </Text>
       <Meter value={ratio} width={40} />

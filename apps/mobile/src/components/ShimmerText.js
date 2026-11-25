@@ -1,9 +1,10 @@
+import { Text } from './Typography';
 // ShimmerText.js — texto de una acción en curso con una franja de luz que lo
 // recorre (Pensando…, Buscando en internet…). RN no recorta degradados con el
 // texto sin dependencias nativas, así que la franja se pinta letra a letra con
 // un solo reloj: cada letra se ilumina cuando la franja pasa por su posición.
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, Easing, Text } from 'react-native';
+import { Animated, Easing, } from 'react-native';
 import { useColors, useReducedMotion } from './ui';
 
 const PERIOD = 2400;

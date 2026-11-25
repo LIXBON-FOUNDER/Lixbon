@@ -1,9 +1,11 @@
+import { TEXT } from '../theme';
+import { Text, TextInput } from '../components/Typography';
 // AuthScreen.js — acceso: iniciar sesión y crear cuenta como dos vistas, cada
 // una con su lámina arriba (volver a casa / zarpar), titular en serif, Google y
 // Apple primero, y el correo debajo. Recuperar la contraseña es una hoja sobre
 // el login, no otra pantalla.
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView,   View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
@@ -178,7 +180,7 @@ export default function AuthScreen() {
 
           <View style={{ flexGrow: 1, paddingHorizontal: 24, marginTop: keyboard ? -24 : register ? -46 : -60 }}>
             <FadeUp delay={60}>
-              <ScreenTitle style={{ fontSize: 36, lineHeight: 40, marginBottom: 24 }}>
+              <ScreenTitle style={{ fontSize: TEXT.title, lineHeight: 40, marginBottom: 24 }}>
                 {register ? 'Crea tu cuenta' : 'Bienvenido\nde nuevo'}
               </ScreenTitle>
             </FadeUp>
@@ -190,7 +192,7 @@ export default function AuthScreen() {
 
             <FadeUp delay={160} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20, marginBottom: 14 }}>
               <View style={{ flex: 1, height: 1, backgroundColor: c.surface4 }} />
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>o con tu correo</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>o con tu correo</Text>
               <View style={{ flex: 1, height: 1, backgroundColor: c.surface4 }} />
             </FadeUp>
 
@@ -206,7 +208,7 @@ export default function AuthScreen() {
                 aside={
                   register ? null : (
                     <Pressable onPress={recover} hitSlop={8}>
-                      <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.dark ? c.accent : c.accentDeep }}>¿La olvidaste?</Text>
+                      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.dark ? c.accent : c.accentDeep }}>¿La olvidaste?</Text>
                     </Pressable>
                   )
                 }
@@ -215,7 +217,7 @@ export default function AuthScreen() {
 
               {!!message && (
                 <FadeUp key={message} distance={4}>
-                  <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 19, color: c.danger }}>{message}</Text>
+                  <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 19, color: c.danger }}>{message}</Text>
                 </FadeUp>
               )}
 
@@ -233,7 +235,7 @@ export default function AuthScreen() {
                   transform: [{ scale: pressed ? 0.98 : 1 }],
                 })}
               >
-                <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.onPrimary }}>
+                <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.body, color: c.onPrimary }}>
                   {register ? (busy ? 'Creando cuenta…' : 'Crear cuenta') : busy ? 'Entrando…' : 'Iniciar sesión'}
                 </Text>
               </Pressable>
@@ -241,9 +243,9 @@ export default function AuthScreen() {
 
             <View style={{ flex: 1, minHeight: 32 }} />
             <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>{register ? '¿Ya tienes cuenta? ' : '¿No tienes cuenta? '}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>{register ? '¿Ya tienes cuenta? ' : '¿No tienes cuenta? '}</Text>
               <Pressable onPress={() => switchMode(register ? 'login' : 'register')} hitSlop={10}>
-                <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{register ? 'Iniciar sesión' : 'Crear cuenta'}</Text>
+                <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{register ? 'Iniciar sesión' : 'Crear cuenta'}</Text>
               </Pressable>
             </View>
           </View>
@@ -265,7 +267,7 @@ function Field({ label, aside = null, secure = false, surface, ...input }) {
   return (
     <View style={{ gap: 6 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.ink70 }}>{label}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink70 }}>{label}</Text>
         {aside}
       </View>
       <View style={{ height: 48, borderRadius: RADIUS, backgroundColor: surface || (focused ? c.surface4 : c.surface3), flexDirection: 'row', alignItems: 'center' }}>
@@ -279,7 +281,7 @@ function Field({ label, aside = null, secure = false, surface, ...input }) {
           selectionColor={c.accent}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          style={{ flex: 1, height: 48, paddingLeft: 14, paddingRight: secure ? 4 : 14, fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}
+          style={{ flex: 1, height: 48, paddingLeft: 14, paddingRight: secure ? 4 : 14, fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}
         />
         {secure && (
           <Pressable
@@ -305,7 +307,7 @@ function Strength({ password }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: -4 }}>
       <Meter value={missing > 0 ? n / MIN_PASSWORD / 1.5 : strong ? 1 : 0.75} color={missing > 0 ? c.inkMuted : c.accent} />
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>{label}</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{label}</Text>
     </View>
   );
 }
@@ -329,7 +331,7 @@ function SocialButton({ label, icon, onPress, disabled }) {
       })}
     >
       {icon}
-      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>{label}</Text>
+      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{label}</Text>
     </Pressable>
   );
 }
@@ -359,7 +361,7 @@ function RecoverSheet({ initialEmail, onDone }) {
       <FadeUp style={{ paddingHorizontal: 8, gap: 18 }}>
         <SheetTitle detail={`Si ${email.trim()} tiene cuenta, en unos minutos te llega el enlace. Revisa también el correo no deseado.`}>Revisa tu correo</SheetTitle>
         <Pressable onPress={() => onDone(null)} style={{ height: 50, borderRadius: RADIUS, backgroundColor: c.raised, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.onRaised }}>Listo</Text>
+          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.onRaised }}>Listo</Text>
         </Pressable>
       </FadeUp>
     );
@@ -369,13 +371,13 @@ function RecoverSheet({ initialEmail, onDone }) {
     <View style={{ paddingHorizontal: 8, gap: 18 }}>
       <SheetTitle detail="Te enviaremos un enlace para crear una nueva.">Recupera tu contraseña</SheetTitle>
       <Field label="Correo" value={email} onChangeText={setEmail} keyboardType="email-address" surface={c.surface4} onSubmitEditing={send} autoFocus={!initialEmail} />
-      {!!error && <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.danger }}>{error}</Text>}
+      {!!error && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.danger }}>{error}</Text>}
       <Pressable
         onPress={send}
         disabled={state === 'sending'}
         style={({ pressed }) => ({ height: 50, borderRadius: RADIUS, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', opacity: state === 'sending' ? 0.5 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] })}
       >
-        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.onPrimary }}>{state === 'sending' ? 'Enviando…' : 'Enviar enlace'}</Text>
+        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.body, color: c.onPrimary }}>{state === 'sending' ? 'Enviando…' : 'Enviar enlace'}</Text>
       </Pressable>
     </View>
   );

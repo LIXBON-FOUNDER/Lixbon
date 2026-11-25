@@ -1,7 +1,9 @@
+import { TEXT } from '../../theme';
+import { Text } from '../../components/Typography';
 // ProjectScreen.js — un Project en Supervisar (LXO-108): su estado y contadores separados, sus Tasks activas y
 // el acceso a su Attention. Sale de la snapshot; las Tasks abren su detalle (LXO-110).
 import React from 'react';
-import { Text, View } from 'react-native';
+import {  View } from 'react-native';
 
 import { Eyebrow, useColors } from '../../components/ui';
 import { projectModel } from '../../observe/home';
@@ -26,7 +28,7 @@ export default function ProjectScreen({ obs, route }) {
       </View>
       {p.attention ? (
         <RowButton label={`Ver la atención de ${p.name}: ${p.attention}`} onPress={() => obs.push(m.attentionRoute)}>
-          <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>{`Ver su atención · ${p.attention}`}</Text>
+          <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{`Ver su atención · ${p.attention}`}</Text>
         </RowButton>
       ) : null}
       <View style={{ gap: 8 }}>
@@ -36,7 +38,7 @@ export default function ProjectScreen({ obs, route }) {
         ) : (
           m.tasks.map((t) => <ActiveTaskRow key={t.id} task={t} now={obs.now} onOpen={(r) => obs.push(r)} showProject={false} />)
         )}
-        {m.partial && m.tasks.length < p.active ? <Body muted style={{ fontSize: 12.5 }}>Puede tener más tareas activas fuera del resumen.</Body> : null}
+        {m.partial && m.tasks.length < p.active ? <Body muted style={{ fontSize: TEXT.meta }}>Puede tener más tareas activas fuera del resumen.</Body> : null}
       </View>
     </View>
   );
