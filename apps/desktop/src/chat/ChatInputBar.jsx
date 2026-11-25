@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // ChatInputBar.jsx — caja de entrada del chat (crema, redondeada, según diseño web)
 // con menciones de archivo (@) y selector de modelo.
 //
@@ -385,7 +386,7 @@ export function ChatInputBar() {
         <div className="chat-inputbar__chips">
           {mentions.map((m) => (
             <span key={m.path} className="ctx-chip" title={m.rel}>
-              <IconFileCode size={13} />
+              <FileIcon nombre={m.path} size={16} />
               @{m.name}
               <button
                 onClick={() => setMentions((prev) => prev.filter((x) => x.path !== m.path))}
@@ -415,7 +416,7 @@ export function ChatInputBar() {
               onPointerEnter={() => setMentionSel(i)}
               onMouseDown={(e) => { e.preventDefault(); pickMention(f); }}
             >
-              <IconFileCode size={13} />
+              <FileIcon nombre={f.path} size={16} />
               <span className="mention-menu__name">{f.name}</span>
               <span className="mention-menu__rel">{f.rel}</span>
             </div>

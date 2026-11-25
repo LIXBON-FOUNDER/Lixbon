@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 import { useId } from 'react';
 import { attemptStatusInfo } from './adeLabels';
 import { formatDurationMs } from './attemptFormat';
@@ -49,7 +50,7 @@ function Files({ changes }) {
           <summary>Ver archivos</summary>
           <ul className="cmp-files">
             {changes.list.map((f) => (
-              <li key={f.path}><code className="mono">{f.path}</code>{f.additions === null ? ' · binario' : <span className="cmp-diffstat"> +{f.additions} −{f.deletions}</span>}</li>
+              <li key={f.path}><FileIcon nombre={f.path} size={16} /><code className="mono">{f.path}</code>{f.additions === null ? ' · binario' : <span className="cmp-diffstat"> +{f.additions} −{f.deletions}</span>}</li>
             ))}
           </ul>
           {changes.truncated && <p className="cmp-note">Se muestran {changes.list.length} de {changes.total_files} archivos.</p>}
@@ -115,7 +116,7 @@ function Overlaps({ overlaps }) {
         : (
           <>
             <ul className="cmp-files">
-              {overlaps.items.map((o) => <li key={o.path}><code className="mono">{o.path}</code> · {o.attempt_ids.join(', ')}</li>)}
+              {overlaps.items.map((o) => <li key={o.path}><FileIcon nombre={o.path} size={16} /><code className="mono">{o.path}</code> · {o.attempt_ids.join(', ')}</li>)}
             </ul>
             {overlaps.total > overlaps.items.length && <p className="cmp-note">Se muestran {overlaps.items.length} de {overlaps.total} solapes.</p>}
           </>

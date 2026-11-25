@@ -1,8 +1,10 @@
+import '@lixbon/icons/status/css';
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import "@fontsource-variable/hanken-grotesk";
+import "@lixbon/fonts/sans.css";
+import "@lixbon/fonts/serif-variable.css";
 import "@fontsource-variable/jetbrains-mono";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/base.css";

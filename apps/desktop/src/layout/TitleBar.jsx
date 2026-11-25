@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // TitleBar.jsx — barra de ventana propia (decorations: false): marca,
 // proyecto, selector de modo, buscador desplegable, paneles, cuenta y los
 // controles de ventana. En modo minimal (sin sesión) solo marca y controles.
@@ -241,7 +242,7 @@ function SearchExpand() {
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(r)}
               >
-                {r.kind === 'file' && <IconFileCode size={14} />}
+                {r.kind === 'file' && <FileIcon nombre={r.key} size={16} />}
                 {r.kind === 'cmd' && <span className="menu__chev">›</span>}
                 {r.kind === 'symbol' && <span className="menu__chev">@</span>}
                 {r.kind === 'text' && <IconSearch size={14} />}

@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // QuickOpen.jsx — buscador rápido de archivos (Ctrl+P), estilo VSCode.
 // Carga la lista plana del workspace una vez al abrirse y filtra con un
 // fuzzy match por subsecuencia (bonus por caracteres consecutivos).
@@ -5,7 +6,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { listFiles } from '../lib/tauri';
 import { useAppStore } from '../store/appStore';
 import { useFileViewStore } from '../store/fileViewStore';
-import { IconFileCode, IconSearch } from './Icons';
+import { IconSearch } from './Icons';
 import { fuzzyScore } from '../lib/fuzzy';
 
 export function QuickOpen() {
@@ -98,7 +99,7 @@ export function QuickOpen() {
               onPointerEnter={() => setSelected(i)}
               onClick={() => openFile(file)}
             >
-              <IconFileCode size={15} />
+              <FileIcon nombre={file.path} size={16} />
               <span className="quickopen__name">{file.name}</span>
               <span className="quickopen__rel">{file.rel}</span>
             </div>

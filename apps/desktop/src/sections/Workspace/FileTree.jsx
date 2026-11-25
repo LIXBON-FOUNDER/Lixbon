@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // FileTree.jsx — explorador de archivos del workspace (panel izquierdo).
 // Clic en un archivo → se abre en una pestaña del editor. Clic
 // derecho → menú contextual (nuevo, renombrar, duplicar, copiar ruta, revelar,
@@ -13,8 +14,6 @@ import { useAppStore } from '../../store/appStore';
 import {
   IconFolder,
   IconFolderOpen,
-  IconFile,
-  IconFileCode,
   IconFilePlus,
   IconFolderPlus,
   IconRefresh,
@@ -22,15 +21,7 @@ import {
   IconChevronRight,
 } from '../../components/Icons';
 
-const CODE_EXTS = new Set([
-  'js', 'jsx', 'ts', 'tsx', 'py', 'rs', 'go', 'css', 'scss', 'html', 'json',
-  'md', 'toml', 'yml', 'yaml', 'sh', 'sql', 'vue', 'svelte', 'c', 'cpp', 'h', 'java',
-]);
-
-function fileIcon(name) {
-  const ext = (name.split('.').pop() || '').toLowerCase();
-  return CODE_EXTS.has(ext) ? <IconFileCode size={15} /> : <IconFile size={15} />;
-}
+const fileIcon = (nombre) => <FileIcon nombre={nombre} size={16} />;
 
 function baseName(path) {
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;

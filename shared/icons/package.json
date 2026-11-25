@@ -16,11 +16,22 @@
     "./css": "./react/iconos.css",
     "./icons.json": "./icons.json",
     "./svg/*": "./svg/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./file-icons": {
+      "react-native": "./native/FileIcon.js",
+      "default": "./file-icons/index.js"
+    },
+    "./file-icons/resolver": "./file-icons/resolver.js",
+    "./status": {
+      "react-native": "./native/StatusIcon.js",
+      "default": "./status/index.js"
+    },
+    "./status/css": "./status/status.css"
   },
   "sideEffects": [
     "*.css",
-    "./react/iconos.css"
+    "./react/iconos.css",
+    "./status/status.css"
   ],
   "peerDependencies": {
     "react": ">=18",
