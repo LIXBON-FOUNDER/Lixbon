@@ -1,3 +1,5 @@
+import { StatusIcon } from '@lixbon/icons/status';
+import { attentionKind } from './statusIcons';
 import { InboxLaunchApproval } from './InboxLaunchApproval';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -149,7 +151,7 @@ function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onBlur, 
     <>
       <span className={`attention-inbox__sev attention-inbox__sev--${item.severity}`} aria-hidden="true" />
       <span className="attention-inbox__body">
-        <span className="attention-inbox__category" title={CATEGORY_HINTS[item.category]}>{category}</span>
+        <span className="attention-inbox__category" title={CATEGORY_HINTS[item.category]}><StatusIcon kind={attentionKind(item.category)} size={16} style={{ color: ['high', 'critical'].includes(item.severity) ? 'var(--danger-ink)' : 'var(--warn)' }} />{category}</span>
         <span className="attention-inbox__meta" id={metaId}>
           <span>{severity}</span>
           <span aria-hidden="true">·</span>

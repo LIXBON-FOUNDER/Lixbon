@@ -126,7 +126,7 @@ export function PreviewComposer({ attemptId, from = 'ADE' }) {
           value={text}
           onChange={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`; }}
           onKeyDown={onKey}
-          placeholder={busy ? 'Añade una instrucción para después de este turno… (Shift Enter: nueva línea)' : 'Escribe al agente…'}
+          placeholder="Añade una instrucción para el siguiente paso…"
           aria-label="Instrucción"
         />
         <div className="pv-composer__bar">

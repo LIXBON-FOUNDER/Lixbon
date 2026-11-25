@@ -356,6 +356,8 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
         {refreshable && <button type="button" className="twk__action" onClick={state.retry}>Actualizar</button>}
       </header>
 
+      {visible && variant === 'workspace' && <div className="ade-core-phase"><div className="ade-start__phases" aria-label="Fases del intento"><span>Preparación</span><span>Ejecución</span><span>Verificación</span><span>Revisión · tú</span><span>Integración · tú</span></div><p>Fase: <PhaseValue phase={visible.phase} /></p></div>}
+
       {visible && (
         <p className="twk__subtitle">
           Project: {projectName ?? <Missing />} · <code className="twk__mono">{visible.project_id}</code>
@@ -397,6 +399,17 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
       )}
 
       {visible && (
+        <>
+        {/* task_detail aún no publica objetivo, criterios, restricciones ni decisiones.
+            Se reserva su lugar sin deducirlos del título, mensajes o fase. */}
+        <div className="twk__design-summary">
+          <section className="twk__design-section" aria-labelledby={`${uid}-objective`}><h3 id={`${uid}-objective`}>Objetivo</h3><p><Missing /></p></section>
+          <section className="twk__design-section" aria-labelledby={`${uid}-criteria`}><h3 id={`${uid}-criteria`}>Criterios de aceptación</h3><p><Missing /></p></section>
+          <section className="twk__design-section" aria-labelledby={`${uid}-constraints`}><h3 id={`${uid}-constraints`}>Restricciones</h3><p><Missing /></p></section>
+          <section className="twk__design-section" aria-labelledby={`${uid}-decisions`}><h3 id={`${uid}-decisions`}>Decisiones tomadas</h3><p><Missing /></p></section>
+          <section className="twk__design-section" aria-labelledby={`${uid}-parent`}><h3 id={`${uid}-parent`}>Tarea principal</h3><p>{visible.parent_id === null ? 'Esta es una tarea principal' : <TaskLink projectId={visible.project_id} taskId={visible.parent_id} relation="Task padre" onNavigate={navigate} />}</p></section>
+        </div>
+        <details className="twk__details"><summary>Detalles de la tarea</summary>
         <div className="twk__body">
           <Section id={`${uid}-identity`} title="Identidad">
             <Row label="Task"><Value value={visible.title} fallback="Task sin título" /></Row>
@@ -471,6 +484,8 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
 
           <p className="twk__hint twk__verified">Target verificado: la respuesta coincide con el Project ID y Task ID seleccionados. Solo lectura, salvo responder las preguntas abiertas.</p>
         </div>
+        </details>
+        </>
       )}
     </section>
   );
