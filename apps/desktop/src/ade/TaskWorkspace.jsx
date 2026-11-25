@@ -356,6 +356,8 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
         {refreshable && <button type="button" className="twk__action" onClick={state.retry}>Actualizar</button>}
       </header>
 
+      {visible && variant === 'workspace' && <div className="ade-core-phase"><div className="ade-start__phases" aria-label="Fases del intento"><span>Preparación</span><span>Ejecución</span><span>Verificación</span><span>Revisión · tú</span><span>Integración · tú</span></div><p>Fase: <PhaseValue phase={visible.phase} /></p></div>}
+
       {visible && (
         <p className="twk__subtitle">
           Project: {projectName ?? <Missing />} · <code className="twk__mono">{visible.project_id}</code>

@@ -91,7 +91,7 @@ export function readPersistedAdeSelection() {
   return normalizeAdeSelection(raw);
 }
 
-const readOrchView = () => (read('lx_orch_view', 'executions') === 'ade' ? 'ade' : 'executions');
+const readOrchView = () => (read('lx_orch_view', 'ade') === 'ade' ? 'ade' : 'executions');
 
 export const useWorkbenchStore = create((set, get) => ({
   mode: read('lx_mode', 'editor'),

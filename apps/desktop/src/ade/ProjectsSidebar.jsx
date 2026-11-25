@@ -108,8 +108,9 @@ function ProjectRow({ project, expanded, selected, context, position, setSize, i
       <span className="ps__line">
         <span className="ps__chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         <span className="ps__name">{project.name || project.id}</span>
-        <span className="ps__id mono">{project.id}</span>
+        <span className="ps__project-state">{Number.isFinite(counts.active) ? `${counts.active} en marcha` : statusLabel}</span>
       </span>
+      <details className="ps__project-details" onClick={(event) => event.stopPropagation()}><summary>Detalles del proyecto</summary>
       <span className="ps__meta" id={metaId}>
         <span
           className={`ps__badge ps__badge--status${project.status ? ` ps__badge--status-${project.status}` : ''}`}
@@ -135,6 +136,7 @@ function ProjectRow({ project, expanded, selected, context, position, setSize, i
         <span>Host {metaValue(location?.machine)}</span>
         <span>Origen {metaValue(location?.path)}</span>
       </span>
+      </details>
       {children}
     </li>
   );
@@ -582,11 +584,10 @@ export function ProjectsSidebar({
       data-testid="projects-sidebar"
     >
       <header className="ps__head">
-        <h2 id={headingId} className="ps__title">Projects</h2>
-        <p className="ps__subtitle">Projects y Tasks del Core, con su estado y su Attention. Solo lectura.</p>
+        <h2 id={headingId} className="ps__title ps__sr-only">Proyectos</h2>
       </header>
 
-      <div className="ps__filters">
+      <details className="ps__filter-menu"><summary>Filtrar tareas</summary><div className="ps__filters">
         <span className="ps__filter-label" id={`${headingId}-tasks-filter`}>Estado de las Tasks</span>
         <div className="ps__radios" role="radiogroup" aria-labelledby={`${headingId}-tasks-filter`}>
           {TASK_STATUS_VIEWS.map((view) => (
@@ -610,7 +611,7 @@ export function ProjectsSidebar({
           ))}
         </div>
       </div>
-
+      </details>
       <div
         className={automaticFilterAnnouncement ? 'ps__state ps__state--muted' : 'ps__live-region--sr-only'}
         role="status"
@@ -623,11 +624,10 @@ export function ProjectsSidebar({
       </div>
 
       {statusView.code === 'active' && (
-        <p className="ps__hint" data-testid="active-view-hint">
+        <p className="ps__sr-only" data-testid="active-view-hint">
           Vista «Activas»: las Tasks finalizadas quedan ocultas. Usa «Finalizadas» o «Todas» para descubrirlas.
         </p>
       )}
-
       <Feedback
         state={overview}
         subject="Projects"
@@ -704,10 +704,10 @@ export function ProjectsSidebar({
         </p>
       )}
 
-      <p className="ps__note">
+      <details className="ps__help"><summary>Acerca de Trabajo</summary><p className="ps__subtitle">Projects y Tasks del Core, con su estado y su Attention. Solo lectura.</p><p className="ps__note">
         Este navegador solo lee: sin arrastrar y sin marcar como leído. Un intento nuevo se crea desde el Project y se aprueba en el detalle del intento.
         La identidad de cada fila es su ID durable; host, origen, rama y worktree son metadato.
-      </p>
+      </p></details>
       {coreModel.mode === 'legacy' && (
         <p className="ps__note ps__note--info" role="status" data-testid="core-model-legacy">{COPY.modelInactive}</p>
       )}

@@ -1,6 +1,7 @@
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TASK_PAGE_LIMIT, listAdeTasks } from './coreQueries';
 import { useCoreQuery } from './useCoreQuery';
+import { StatusIcon } from '@lixbon/icons/status';
 import {
   TASK_STATUS_LABELS,
   FINAL_TASK_STATUSES,
@@ -82,15 +83,9 @@ function TaskRow({ project, task, selected, stale, position, setSize, isActiveKe
       }}
     >
       <span className="ps__line">
-        <span
-          className={`ps__badge ps__badge--task ps__badge--${tone}${isFinal ? ' ps__badge--final' : ''}`}
-          data-status={task.status}
-        >
-          {statusLabel}
-        </span>
+        <StatusIcon kind={task.status === 'done' ? 'done' : task.status === 'failed' ? 'failed' : ['running', 'starting'].includes(task.status) ? 'working' : ['pending_approval', 'awaiting_terminal_approval'].includes(task.status) ? 'permission' : 'paused'} size={16} />
         {stale && <span className="ps__badge ps__badge--stale">Datos previos</span>}
         <span className="ps__name">{task.title || task.id}</span>
-        <span className="ps__id mono">{task.id}</span>
         {expandable && (
           <button
             type="button"
@@ -102,17 +97,19 @@ function TaskRow({ project, task, selected, stale, position, setSize, isActiveKe
               tree.setTaskExpanded(key, !expandedAttempts);
             }}
           >
-            {expandedAttempts ? 'Ocultar intentos' : `${attempts.count} intentos`}
+            <span aria-hidden="true">{expandedAttempts ? '⌄' : '›'}</span><span className="sr-only">{expandedAttempts ? 'Ocultar intentos' : `${attempts.count} intentos`}</span>
           </button>
         )}
       </span>
+      <span className={`ps__task-state ps__badge--${tone}`} data-status={task.status}>{statusLabel}</span>
       {attempts && (
         <span className="ps__line ps__line--attempt" data-testid="task-attempt-summary">
           {latest ? <AttemptChip attempt={latest} /> : <NoAttempts />}
           {attempts.count > 1 && <span className="ps__hint">último de {attempts.count}</span>}
         </span>
       )}
-      <span className="ps__meta" id={metaId}>
+      <details className="ps__task-details" onClick={(event) => event.stopPropagation()}><summary>Detalles de la tarea</summary><span className="ps__meta" id={metaId}>
+        <span className="ps__id mono">{task.id}</span>
         {latest ? <AttemptMeta attempt={latest} /> : (
           <>
             <span>Proveedor {metaValue(task.provider)}</span>
@@ -121,7 +118,7 @@ function TaskRow({ project, task, selected, stale, position, setSize, isActiveKe
             <span>Worktree {asText(task.worktree) ?? 'Solo en detalle'}</span>
           </>
         )}
-      </span>
+      </span></details>
       {expandedAttempts && (
         <TaskAttemptGroup projectId={project.id} taskId={task.id} taskTitle={task.title || task.id} expectedCount={attempts.count} />
       )}

@@ -1,4 +1,5 @@
 import { AdeActivityRail } from './AdeActivityRail';
+import { LogoMark } from '../components/Logo';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Collapse } from '../layout/Collapse';
 import { Gutter } from '../layout/Gutter';
@@ -132,7 +133,9 @@ function locationLastSeen(value) {
 const WORKSPACE_VIEWS = [
   { key: 'workspace', label: 'Intento' },
   { key: 'attention', label: 'Atención' },
-  { key: 'activity', label: 'Activity' },
+  { key: 'compare', label: 'Comparar' },
+  { key: 'map', label: 'Mapa' },
+  { key: 'activity', label: 'Actividad' },
 ];
 
 // Misma política que useCoreQuery: ninguna lectura de Core queda abierta indefinidamente.
@@ -453,6 +456,7 @@ function WorkspaceViewSwitch({ view, onChange, idPrefix }) {
 export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenRun, onOpenSpawnRequest }) {
   const viewIds = useId();
   const [workspaceView, setWorkspaceView] = useState('workspace');
+  const [inspectorTab, setInspectorTab] = useState('task');
   const [attentionTarget, setAttentionTarget] = useState(null);
   const [attentionNotice, setAttentionNotice] = useState(null);
   const [activityScopePref, setActivityScopePref] = useState(null);
@@ -934,7 +938,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
       <AdeActivityRail view={workspaceView} onSelect={changeWorkspaceView} />
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
-          <div className="panelhead"><span className="panelhead__title">Trabajo</span><span className="ade__source">Navegador</span><AdeSourceSwitch /></div>
+          <div className="panelhead"><span className="panelhead__title">Trabajo</span></div>
           <div className="ade__nav-content">
             <section className="ade__nav-section ade__nav-scroll-region ade__nav-projects-scroll" aria-label="Projects y Tasks" tabIndex={0}>
               <ProjectsSidebar
@@ -951,11 +955,12 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               />
             </section>
             {operationNavigation && (
-              <div className="ade__nav-scroll-region ade__nav-operation-scroll" role="region" aria-label="Navegación de Operación" tabIndex={0}>
+              <details className="ade__nav-scroll-region ade__nav-operation-scroll"><summary>Ejecuciones existentes</summary><div role="region" aria-label="Navegación de Operación" tabIndex={0}>
                 {operationNavigation}
-              </div>
+              </div></details>
             )}
           </div>
+          <div className="pv-source-footer"><AdeSourceSwitch /></div>
         </Panel>
         <Gutter sizeKey="side" />
       </Collapse>
@@ -968,6 +973,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
           <Panel id="ade-workspace" className="wb__grow orch__main ade__workspace">
             <div className="panelhead ade__workspace-head">
               <WorkspaceViewSwitch view={workspaceView} onChange={changeWorkspaceView} idPrefix={viewIds} />
+              {import.meta.env.DEV && window.__LIXBON_BROWSER_MOCK__ && <span className="ade-demo-label">Datos de demostración</span>}
               {selectedTaskId && <span className="ade__durable-id mono">Task · {selectedTaskId}</span>}
             </div>
             <div
@@ -977,7 +983,12 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               aria-labelledby={`${viewIds}-tab-workspace`}
               hidden={workspaceView !== 'workspace'}
             >
-              {!selectedProjectId && <div className="ade__workspace-empty changes__empty">Selecciona un Project del Core.</div>}
+              {!selectedProjectId && <div className="ade-start">
+                <div className="ade-start__breadcrumb">Trabajo</div>
+                <header><h1>Tu espacio de trabajo</h1><span className="ade-start__state">Sin tarea seleccionada</span></header>
+                <div className="ade-start__phases" aria-label="Fases del intento"><span>Preparación</span><span>Ejecución</span><span>Verificación</span><span>Revisión · tú</span><span>Integración · tú</span></div>
+                <div className="ade-start__empty"><LogoMark size={32} /><h2>Elige una tarea para empezar</h2><p>Abre un proyecto en Trabajo para ver sus tareas, seguir un intento o crear uno nuevo.</p><button type="button" className="btn btn--ghost" onClick={() => changeWorkspaceView('attention')}>Ver Atención</button></div>
+              </div>}
               {selectedProjectId && !selectedTaskId && (
                 <div className="ade__task-overview scroll">
                   <ProjectView
@@ -1011,18 +1022,18 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     )}
                   />
                   {/* Qué ofrece cada proveedor (LXO-135): lo que dice el Core, no lo que se supone por su nombre. */}
-                  <ProviderInspector active={workspaceActive && workspaceView === 'workspace'} />
+                  <details className="ade-project-details"><summary>Proveedores y consumo</summary><ProviderInspector active={workspaceActive && workspaceView === 'workspace'} />
                   {/* Cuánta cuota le queda a la cuenta de cada proveedor (LXO-206): el Core consulta en segundo plano. */}
                   <UsageView active={workspaceActive && workspaceView === 'workspace'} />
+                  </details>
                   {/* Qué contexto viajaría en un ContextPackage (LXO-136): solo lectura, antes de cualquier transferencia. */}
-                  <ContextPreview />
+                  <details className="ade-project-details"><summary>Revisar contexto</summary><ContextPreview /></details>
                 </div>
               )}
               {selectedTaskId && (
                 <div className="ade__task-overview scroll">
                   <TaskWorkspace {...workspaceProps} variant="workspace" />
-                  {coreModel.vNext && <AttemptTransfer key={selectedTaskId} task={{ id: selectedTaskId }} projectId={selectedProjectId} active={workspaceActive && workspaceView === 'workspace'} />}
-                  <AttemptHistory
+                  <details className="ade-history-disclosure" open={!selectedAttemptId}><summary>Intentos de esta tarea</summary><AttemptHistory
                     taskId={selectedTaskId}
                     coreModel={coreModel}
                     active={workspaceActive && workspaceView === 'workspace'}
@@ -1030,6 +1041,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     onSelectAttempt={(attemptId) => selectAttempt({ projectId: selectedProjectId, taskId: selectedTaskId, attemptId })}
                     onBack={() => selectTask({ projectId: selectedProjectId, taskId: null })}
                   />
+                  </details>
                   {selectedAttemptId && (
                     <AttemptDetail
                       projectId={selectedProjectId}
@@ -1095,6 +1107,11 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                 onOpenTarget={openActivityTarget}
               />
             </div>
+            <div className="ade-view-panel ade-real-compare scroll" role="tabpanel" id={`${viewIds}-panel-compare`} aria-labelledby={`${viewIds}-tab-compare`} hidden={workspaceView !== 'compare'}>
+              <header><h1>Comparar intentos</h1><p>Elige los intentos de una misma tarea para comparar su evidencia.</p></header>
+              {selectedTaskId ? <AttemptHistory taskId={selectedTaskId} coreModel={coreModel} active={workspaceActive && workspaceView === 'compare'} selectedAttemptId={selectedAttemptId} onSelectAttempt={(attemptId) => selectAttempt({projectId: selectedProjectId, taskId: selectedTaskId, attemptId})} onBack={() => changeWorkspaceView('workspace')} /> : <div className="ade-view-empty">Selecciona una tarea en Trabajo para ver sus intentos.</div>}
+            </div>
+            <div className="ade-view-panel ade-real-map" role="tabpanel" id={`${viewIds}-panel-map`} aria-labelledby={`${viewIds}-tab-map`} hidden={workspaceView !== 'map'}><header><h1>Mapa de tareas</h1><p>Dependencias y archivos compartidos</p></header><div className="ade-view-empty"><LogoMark size={32} /><h2>No hay un mapa disponible</h2><p>Las dependencias todavía no están informadas para este espacio de trabajo.</p></div></div>
           </Panel>
 
           <RightDock
@@ -1108,14 +1125,27 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
             onCloseDrawer={onCloseDrawer}
           >
             <div className="panelhead"><span className="panelhead__title">Inspector</span></div>
-            <div className="ade__inspector-content">
-              <section className="ade__inspector-section">
+            <div className="ade-real-inspector-tabs" role="tablist" aria-label="Inspector" onKeyDown={(event) => {
+              const keys = ['task', 'changes', 'context', 'autonomy'];
+              const index = keys.indexOf(inspectorTab);
+              const next = event.key === 'ArrowRight' ? (index + 1) % keys.length : event.key === 'ArrowLeft' ? (index + keys.length - 1) % keys.length : event.key === 'Home' ? 0 : event.key === 'End' ? keys.length - 1 : null;
+              if (next !== null) { event.preventDefault(); setInspectorTab(keys[next]); event.currentTarget.querySelectorAll('[role="tab"]')[next]?.focus(); }
+            }}>{[['task', 'Tarea'], ['changes', 'Cambios'], ['context', 'Contexto'], ['autonomy', 'Autonomía']].map(([id, label]) => <button type="button" role="tab" key={id} id={`${viewIds}-inspector-tab-${id}`} aria-controls={`${viewIds}-inspector-${id}`} aria-selected={inspectorTab === id} tabIndex={inspectorTab === id ? 0 : -1} className={inspectorTab === id ? 'is-active' : ''} onClick={() => setInspectorTab(id)}>{label}</button>)}</div>
+            <div className="ade__inspector-content" role="tabpanel" id={`${viewIds}-inspector-${inspectorTab}`} aria-labelledby={`${viewIds}-inspector-tab-${inspectorTab}`}>
+              {inspectorTab === 'task' && <>
+              <details className="ade__inspector-section ade-selection-details"><summary>Identificadores</summary>
                 <div className="ssec__label">Selección ADE</div>
                 <div className="ade__selection-row"><span>Project ID</span><span className="mono">{selectedProjectId || 'Ninguno'}</span></div>
                 <div className="ade__selection-row"><span>Task ID</span><span className="mono">{selectedTaskId || 'Ninguna'}</span></div>
                 {selectedAttemptId && <div className="ade__selection-row"><span>Attempt ID</span><span className="mono">{selectedAttemptId}</span></div>}
-              </section>
+              </details>
+              {!selectedTaskId && <div className="ade-inspector-empty"><span>Tarea</span><p>Elige una tarea para ver su objetivo, criterios de aceptación, restricciones y decisiones.</p></div>}
               {selectedTaskId && <TaskWorkspace {...workspaceProps} variant="inspector" />}
+              {selectedTaskId && coreModel.vNext && <details className="ade-task-actions"><summary>Acciones de la tarea</summary><AttemptTransfer key={selectedTaskId} task={{ id: selectedTaskId }} projectId={selectedProjectId} active={workspaceActive} /></details>}
+              </>}
+              {inspectorTab === 'changes' && <div className="ade-inspector-empty"><span>Desde la base</span><p>{selectedAttemptId ? 'Abre el intento para revisar sus cambios y sus pruebas.' : 'Elige un intento para ver sus archivos cambiados.'}</p>{selectedAttemptId && <button type="button" className="btn btn--ghost" onClick={() => changeWorkspaceView('workspace')}>Revisar los cambios</button>}</div>}
+              {inspectorTab === 'context' && <div className="ade-core-context"><ContextPreview /></div>}
+              {inspectorTab === 'autonomy' && <div className="ade-core-autonomy"><h3>Perfil de autonomía</h3><section><h4>Lo hace solo</h4><p>No informado</p></section><section><h4>Te pregunta antes</h4><p>No informado</p></section><section><h4>Nunca lo hace</h4><p>No informado</p></section><p>Integrar siempre lo decides tú.</p></div>}
             </div>
           </RightDock>
         </div>

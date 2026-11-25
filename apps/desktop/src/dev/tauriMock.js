@@ -2,6 +2,7 @@
 // con un proyecto de ejemplo en memoria para poder diseñar y revisar la
 // interfaz en un navegador sin compilar el backend de Rust.
 const ROOT = '/demo/orbita-web';
+window.__LIXBON_BROWSER_MOCK__ = true;
 
 const FILES = {
   'package.json': '{\n  "name": "orbita-web",\n  "private": true,\n  "scripts": { "dev": "vite", "test": "vitest" }\n}\n',
@@ -246,6 +247,11 @@ function adeQuery(query, args) {
   const vNext = qs.get('coremodel') === 'v1';
   const inactive = () => { throw new Error('core_model_inactive: el Core aún sirve el modelo legacy; usa tasks_by_project y task_detail'); };
   switch (query) {
+    case 'task_detail': {
+      const task = ADE_TASKS.find((item) => item.id === args.task_id);
+      if (!task || args.project_id !== 'demo-p1') throw new Error('tasks_not_found');
+      return { v: 1, task: { ...task, project_id: 'demo-p1', child_ids: [], phase: null, messages: [], cwd: null, merged: false, review: null, integration: null, failure_reason: null } };
+    }
     // LXO-135: qué ofrece cada proveedor. `?caps=bloqueado` simula un entorno bloqueado y `?caps=sondeando` el primer sondeo del Core.
     case 'provider_capabilities': {
       const ALL = ['start', 'events', 'answer', 'interrupt', 'steer', 'resume'];

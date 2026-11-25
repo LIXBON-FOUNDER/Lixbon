@@ -444,6 +444,11 @@ export function OrchestratorMode({ modeActive = true }) {
   );
   // Un lanzamiento pendiente vence a los 10 minutos: si no hay nada elegido, se enseña él antes que la ayuda.
   const pendingItem = spawns.items.find((x) => x.pending_id === pendingSel) || (!task ? spawns.items[0] : null) || null;
+  // Una selección antigua de «Ejecuciones» no debe abrir la ayuda legacy como inicio del ADE.
+  // Un Run o permiso existente conserva su terminal y sus acciones.
+  useEffect(() => {
+    if (snap && modeActive && adeSource === 'core' && !task) setOrchView(pendingItem ? 'executions' : 'ade');
+  }, [modeActive, adeSource, Boolean(snap), task?.id, pendingItem?.pending_id, setOrchView]);
   const anyLive = useMemo(() => Object.values(snap?.tasks || {}).some((t) => !isFinal(t.status)), [snap]);
   // Cuenta atrás de la aprobación en terminal: refresco por segundo solo mientras alguna espera.
   const anyAwaiting = useMemo(() => Object.values(snap?.tasks || {}).some(isAwaitingTerminalApproval), [snap]);
