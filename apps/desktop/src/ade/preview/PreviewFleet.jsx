@@ -1,3 +1,4 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // PreviewFleet.jsx — Mapa, Hosts y Uso. La computación y el consumo son contexto de cada decisión,
 // no un panel financiero. El mapa es una vista avanzada para mucho paralelismo; no es el inicio.
 import { useMemo, useState } from 'react';
@@ -100,7 +101,7 @@ export function PreviewHosts() {
           const atts = s.attempts.filter((a) => a.host === h.id);
           return (
             <article key={h.id} className={`pv-host${h.status === 'offline' ? ' is-off' : ''}`}>
-              <header><span className={`dot ${h.status === 'online' ? 'dot--good' : ''}`} /><b>{h.name}</b><span className="pv-tag pv-tag--dim">{h.transport}</span><span className="panelhead__fill" /><span className={h.status === 'online' ? 'pv-good' : 'pv-muted'}>{h.status === 'online' ? 'Conectado' : 'Desconectado'}</span></header>
+              <header><StatusIcon kind={h.status === 'offline' ? 'offline' : atts.some((a) => a.state === 'waiting') ? 'host-needs' : /windows/i.test(h.os) ? 'monitor' : /mac/i.test(h.os) ? 'laptop' : 'server'} size={20} /><b>{h.name}</b><span className="pv-tag pv-tag--dim">{h.transport}</span><span className="panelhead__fill" /><span className={h.status === 'online' ? 'pv-good' : 'pv-muted'}>{h.status === 'online' ? 'Conectado' : 'Desconectado'}</span></header>
               <div className="pv-muted">{h.os} · {h.note}</div>
               <div><b className="mono">{hostCount(s, h.id)}</b> Intentos · {atts.filter((a) => a.state === 'working').length} en ejecución</div>
               <ul className="pv-host__list">

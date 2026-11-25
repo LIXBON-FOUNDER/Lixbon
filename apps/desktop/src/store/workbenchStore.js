@@ -26,7 +26,7 @@ export const SIZE_LIMITS = {
   inspector: [240, 420],
 };
 
-const DEFAULT_SIZES = { side: 240, agent: 400, terminal: 190, sessions: 248, changes: 360, inspector: 300 };
+const DEFAULT_SIZES = { side: 240, agent: 400, terminal: 190, sessions: 270, changes: 360, inspector: 300 };
 
 // Paneles laterales de los modos que no son el editor (el editor usa
 // sideOpen/agentOpen). Todos tienen izquierdo y derecho: el derecho es el

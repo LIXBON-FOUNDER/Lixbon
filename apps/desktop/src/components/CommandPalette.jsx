@@ -32,8 +32,10 @@ export function CommandPalette() {
   const listRef = useRef(null);
 
   useEffect(() => {
+    const previous = document.activeElement;
     inputRef.current?.focus();
-    return onCommandsChanged(() => forceUpdate((n) => n + 1));
+    const unsubscribe = onCommandsChanged(() => forceUpdate((n) => n + 1));
+    return () => { unsubscribe(); previous?.focus?.(); };
   }, []);
 
   const commands = useMemo(
@@ -101,6 +103,11 @@ export function CommandPalette() {
           <input
             ref={inputRef}
             className="quickopen__input"
+            role="combobox"
+            aria-label="Paleta de comandos"
+            aria-controls="command-results"
+            aria-expanded="true"
+            aria-activedescendant={matches[selected] ? `command-result-${selected}` : undefined}
             placeholder="Escribe el nombre de un comando…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -108,13 +115,16 @@ export function CommandPalette() {
             spellCheck={false}
           />
         </div>
-        <div className="quickopen__list" ref={listRef}>
+        <div className="quickopen__list" ref={listRef} role="listbox" id="command-results">
           {matches.length === 0 && (
             <p className="filetree__hint">Sin comandos coincidentes.</p>
           )}
           {matches.map((cmd, i) => (
             <div
               key={cmd.id}
+              id={`command-result-${i}`}
+              role="option"
+              aria-selected={i === selected}
               className={`quickopen__item cmd-item ${i === selected ? 'is-selected' : ''}`}
               onPointerEnter={() => setSelected(i)}
               onClick={() => execute(cmd)}

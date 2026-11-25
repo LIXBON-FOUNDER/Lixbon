@@ -82,7 +82,7 @@ export function GitMode() {
                 value={viewMode}
                 onChange={changeView}
                 width={84}
-                options={[{ value: 'split', label: 'Lado a lado' }, { value: 'inline', label: 'En línea' }]}
+                options={[{ value: 'inline', label: 'Unificado' }, { value: 'split', label: 'Lado a lado' }]}
               />
             </>
           )}

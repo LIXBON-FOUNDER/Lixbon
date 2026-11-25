@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // TaskDiffView.jsx - revisión del diff de una tarea del orquestador (vista propia, no reviewStore).
 // Muestra el diff de la rama de la tarea contra su base_commit y registra Aceptar/Rechazar
 // como decisión humana con orch_review_task. Contrato: ./reviewContract.js
@@ -148,12 +149,12 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
         <>
           <ul className="tdv__files">
             {files.map((f) => (
-              <li key={f.path}><a href={`#tdv-${f.path}`} className="mono">{f.path}</a> <span className="tdv__st">{statusLabel(f.status)}</span> <Counts f={f} /></li>
+              <li key={f.path}><FileIcon nombre={f.path} size={16} /><a href={`#tdv-${f.path}`} className="mono">{f.path}</a> <span className="tdv__st">{statusLabel(f.status)}</span> <Counts f={f} /></li>
             ))}
           </ul>
           {files.map((f) => (
             <section key={f.path} id={`tdv-${f.path}`} className="tdv__file" data-testid={`tdv-file-${f.path}`}>
-              <header className="tdv__fhead mono">{f.path} <span className="tdv__st">{statusLabel(f.status)}</span></header>
+              <header className="tdv__fhead mono"><FileIcon nombre={f.path} size={16} />{f.path} <span className="tdv__st">{statusLabel(f.status)}</span></header>
               <Patch file={f} truncated={diff.truncated} />
             </section>
           ))}
