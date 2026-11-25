@@ -134,14 +134,14 @@ function ChangesTab() {
       <div className="changes__actions">
         {current?.pending && (
           <>
-            <button className="btn btn--ghost btn--sm" onClick={() => accept(current)}>Aceptar</button>
-            <button className="lk" onClick={() => revert(current)}>Descartar</button>
+            <button className="btn btn--primary btn--sm" onClick={() => accept(current)}>Aceptar</button>
           </>
         )}
         <div className="panelhead__fill" />
         {current && current.kind !== 'delete' && !current.reverted && (
-          <button className="lk" onClick={() => openInEditor(current)}>Revisar</button>
+          <button className="btn btn--ghost btn--sm" onClick={() => openInEditor(current)}>Revisar</button>
         )}
+        {current?.pending && <button className="lk" onClick={() => revert(current)}>Descartar</button>}
       </div>
       {pendingFiles.length > 1 && (
         <div className="changes__actions changes__actions--all">
@@ -235,6 +235,7 @@ function TerminalTab() {
 
 export function ChangesPanel() {
   const [tab, setTab] = useState('changes');
+  const files = useTouchedFiles();
   return (
     <div className="changes">
       <div className="panelhead">
@@ -243,7 +244,7 @@ export function ChangesPanel() {
           value={tab}
           onChange={setTab}
           width={76}
-          options={[{ value: 'changes', label: 'Cambios' }, { value: 'context', label: 'Contexto' }, { value: 'terminal', label: 'Terminal' }]}
+          options={[{ value: 'changes', label: `Cambios${files.length ? ` ${files.length}` : ''}` }, { value: 'context', label: 'Contexto' }, { value: 'terminal', label: 'Terminal' }]}
         />
       </div>
       {tab === 'changes' && <ChangesTab />}

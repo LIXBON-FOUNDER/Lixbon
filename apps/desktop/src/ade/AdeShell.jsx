@@ -1,5 +1,7 @@
 import { AdeActivityRail } from './AdeActivityRail';
 import { LogoMark } from '../components/Logo';
+import { CoreAutonomy, CoreChanges, CoreContext } from './CoreInspector';
+import { CoreHosts, CoreIntegrations, CoreTaskMap } from './CoreViews';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Collapse } from '../layout/Collapse';
 import { Gutter } from '../layout/Gutter';
@@ -457,6 +459,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   const viewIds = useId();
   const [workspaceView, setWorkspaceView] = useState('workspace');
   const [inspectorTab, setInspectorTab] = useState('task');
+  const [requestedAttemptTab, setRequestedAttemptTab] = useState(null);
   const [attentionTarget, setAttentionTarget] = useState(null);
   const [attentionNotice, setAttentionNotice] = useState(null);
   const [activityScopePref, setActivityScopePref] = useState(null);
@@ -503,6 +506,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   // Projects/Tasks viven en la navegación unificada, también mientras el canvas
   // contextual muestra un Run. Las selecciones Core no se derivan de Runs.
   const projectViewActive = Boolean(workspaceActive && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
+  const projectTasksActive = projectViewActive || Boolean(workspaceActive && selectedProjectId && workspaceView === 'map');
+  const inventoryActive = projectViewActive || Boolean(workspaceActive && selectedProjectId && workspaceView === 'hosts');
   const onProjectSnapshot = useCallback((snapshot) => setProjectSnapshot(snapshot), []);
   const onProjectsSnapshot = useCallback((snapshot) => setProjectsSnapshot(snapshot), []);
   const currentProjectSnapshot = projectSnapshot?.projectId === selectedProjectId ? projectSnapshot : null;
@@ -516,8 +521,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
     project_id: selectedProjectId,
     status: 'all',
     limit: 50,
-  }, { enabled: projectViewActive });
-  const projectTaskContinuation = useProjectTaskContinuation(selectedProjectId, projectTasks, projectViewActive);
+  }, { enabled: projectTasksActive });
+  const projectTaskContinuation = useProjectTaskContinuation(selectedProjectId, projectTasks, projectTasksActive);
   const projectAttention = useCoreQuery('attention_list', {
     project_id: selectedProjectId,
   }, { enabled: projectViewActive });
@@ -528,7 +533,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   const projectInventory = useCoreQuery('resource_inventory', {
     project_id: selectedProjectId,
     probe: true,
-  }, { enabled: projectViewActive });
+  }, { enabled: inventoryActive });
   // Activity del Project (LXO-204): la misma proyección de Events que la pestaña Activity, acotada
   // al Project durable y en orden descendente. Solo lectura.
   const projectActivity = useCoreQuery('activity_list', {
@@ -935,10 +940,10 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
         </div>
       )}
       <div className="wb wb--orch ade__layout">
-      <AdeActivityRail view={workspaceView} onSelect={changeWorkspaceView} />
-      <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
+      <AdeActivityRail view={workspaceView} onSelect={changeWorkspaceView} hostsAvailable onIntegrations={() => changeWorkspaceView('integrations')} />
+      <Collapse open={leftOpen && !['hosts', 'integrations'].includes(workspaceView)} size={Math.max(sizes.side, 240) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
-          <div className="panelhead"><span className="panelhead__title">Trabajo</span></div>
+          <div className="panelhead"><span className="panelhead__title">Trabajo</span><span className="panelhead__fill" /><NewAttemptForm projectId={selectedProjectId} projectName={selectedProjectName} coreModel={coreModel} active={workspaceActive} triggerLabel="Nueva tarea" onCreated={({projectId, taskId, attemptId}) => attemptId ? selectAttempt({projectId, taskId, attemptId}) : selectTask({projectId, taskId})} /></div>
           <div className="ade__nav-content">
             <section className="ade__nav-section ade__nav-scroll-region ade__nav-projects-scroll" aria-label="Projects y Tasks" tabIndex={0}>
               <ProjectsSidebar
@@ -951,6 +956,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                 onSelectAttempt={selectAttempt}
                 onProjectSnapshot={onProjectSnapshot}
                 onProjectsSnapshot={onProjectsSnapshot}
+                onOpenAttention={() => changeWorkspaceView('attention')}
                 active={modeActive}
               />
             </section>
@@ -960,7 +966,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               </div></details>
             )}
           </div>
-          <div className="pv-source-footer"><AdeSourceSwitch /></div>
+          <details className="pv-source-footer ade-source-options"><summary>Origen de los datos</summary><AdeSourceSwitch /></details>
         </Panel>
         <Gutter sizeKey="side" />
       </Collapse>
@@ -1009,17 +1015,6 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     onRetryResourceInventory={projectInventory.retry}
                     onOpenTask={selectTask}
                     onOpenAttention={openProjectAttention}
-                    // LXO-141: crear una Task con su primer Attempt; queda pendiente de la aprobación de la persona.
-                    actions={(
-                      <NewAttemptForm
-                        projectId={selectedProjectId}
-                        projectName={selectedProjectName}
-                        coreModel={coreModel}
-                        active={workspaceActive && workspaceView === 'workspace'}
-                        // LXO-150: sin intento (solo la Task) se abre la Task; con intento, el intento.
-                        onCreated={({ projectId, taskId, attemptId }) => (attemptId ? selectAttempt({ projectId, taskId, attemptId }) : selectTask({ projectId, taskId }))}
-                      />
-                    )}
                   />
                   {/* Qué ofrece cada proveedor (LXO-135): lo que dice el Core, no lo que se supone por su nombre. */}
                   <details className="ade-project-details"><summary>Proveedores y consumo</summary><ProviderInspector active={workspaceActive && workspaceView === 'workspace'} />
@@ -1046,6 +1041,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     <AttemptDetail
                       projectId={selectedProjectId}
                       attemptId={selectedAttemptId}
+                      requestedTab={requestedAttemptTab}
                       taskId={selectedTaskId}
                       coreModel={coreModel}
                       active={workspaceActive && workspaceView === 'workspace'}
@@ -1111,15 +1107,17 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               <header><h1>Comparar intentos</h1><p>Elige los intentos de una misma tarea para comparar su evidencia.</p></header>
               {selectedTaskId ? <AttemptHistory taskId={selectedTaskId} coreModel={coreModel} active={workspaceActive && workspaceView === 'compare'} selectedAttemptId={selectedAttemptId} onSelectAttempt={(attemptId) => selectAttempt({projectId: selectedProjectId, taskId: selectedTaskId, attemptId})} onBack={() => changeWorkspaceView('workspace')} /> : <div className="ade-view-empty">Selecciona una tarea en Trabajo para ver sus intentos.</div>}
             </div>
-            <div className="ade-view-panel ade-real-map" role="tabpanel" id={`${viewIds}-panel-map`} aria-labelledby={`${viewIds}-tab-map`} hidden={workspaceView !== 'map'}><header><h1>Mapa de tareas</h1><p>Dependencias y archivos compartidos</p></header><div className="ade-view-empty"><LogoMark size={32} /><h2>No hay un mapa disponible</h2><p>Las dependencias todavía no están informadas para este espacio de trabajo.</p></div></div>
+            <div className="ade-view-panel" role="tabpanel" id={`${viewIds}-panel-map`} aria-labelledby={`${viewIds}-tab-map`} hidden={workspaceView !== 'map'}><CoreTaskMap key={selectedProjectId || 'none'} projectId={selectedProjectId} projectName={selectedProjectName} tasks={projectTaskDtos} status={projectTasks.status} error={projectTasks.error} onRetry={projectTasks.retry} hasMore={projectTaskContinuation.hasMore} onLoadMore={projectTaskContinuation.loadMore} onOpenTask={selectTask} /></div>
+            {workspaceView === 'hosts' && <CoreHosts projectId={selectedProjectId} inventory={projectInventory.data} status={resourceInventoryStatus(projectInventory)} onRetry={projectInventory.retry} />}
+            {workspaceView === 'integrations' && <CoreIntegrations />}
           </Panel>
 
           <RightDock
             id="ade-inspector"
             sizeKey="inspector"
             className="ade__inspector"
-            open={rightOpen}
-            visible={workspaceActive}
+            open={rightOpen && ['workspace', 'activity'].includes(workspaceView)}
+            visible={workspaceActive && ['workspace', 'activity'].includes(workspaceView)}
             keepMountedWhenHidden
             drawerOpen={drawerOpen}
             onCloseDrawer={onCloseDrawer}
@@ -1143,9 +1141,9 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               {selectedTaskId && <TaskWorkspace {...workspaceProps} variant="inspector" />}
               {selectedTaskId && coreModel.vNext && <details className="ade-task-actions"><summary>Acciones de la tarea</summary><AttemptTransfer key={selectedTaskId} task={{ id: selectedTaskId }} projectId={selectedProjectId} active={workspaceActive} /></details>}
               </>}
-              {inspectorTab === 'changes' && <div className="ade-inspector-empty"><span>Desde la base</span><p>{selectedAttemptId ? 'Abre el intento para revisar sus cambios y sus pruebas.' : 'Elige un intento para ver sus archivos cambiados.'}</p>{selectedAttemptId && <button type="button" className="btn btn--ghost" onClick={() => changeWorkspaceView('workspace')}>Revisar los cambios</button>}</div>}
-              {inspectorTab === 'context' && <div className="ade-core-context"><ContextPreview /></div>}
-              {inspectorTab === 'autonomy' && <div className="ade-core-autonomy"><h3>Perfil de autonomía</h3><section><h4>Lo hace solo</h4><p>No informado</p></section><section><h4>Te pregunta antes</h4><p>No informado</p></section><section><h4>Nunca lo hace</h4><p>No informado</p></section><p>Integrar siempre lo decides tú.</p></div>}
+              {inspectorTab === 'changes' && <CoreChanges attemptId={selectedAttemptId} active={workspaceActive} onReview={() => { changeWorkspaceView('workspace'); setRequestedAttemptTab({tab: 'changes'}); }} />}
+              {inspectorTab === 'context' && <CoreContext />}
+              {inspectorTab === 'autonomy' && <CoreAutonomy projectId={selectedProjectId} attemptId={selectedAttemptId} active={workspaceActive} />}
             </div>
           </RightDock>
         </div>

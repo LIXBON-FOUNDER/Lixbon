@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useCoreQuery } from './useCoreQuery';
 import { ProjectTasks } from './ProjectTasks';
+import { sumAttentionCounts } from './AttentionInbox';
+import { StatusIcon } from '@lixbon/icons/status';
 import { useTreeNavigation } from './useTreeNavigation';
 import { UNKNOWN_CORE_MODEL } from './useCoreModel';
 import { coreErrorCode, isLegacyModelCode } from './coreModelContract';
@@ -181,6 +183,7 @@ export function ProjectsSidebar({
   coreModel: coreModelProp,
   onProjectSnapshot,
   onProjectsSnapshot,
+  onOpenAttention,
 }) {
   const headingId = useId();
   const statusFilterName = useId();
@@ -232,6 +235,7 @@ export function ProjectsSidebar({
 
   const overview = useCoreQuery('projects_overview', { archived }, { enabled: active, pollMs });
   const projects = overview.data?.projects ?? [];
+  const attentionCounts = overview.data ? sumAttentionCounts(overview.data) : null;
   // Oculta la sección, `overview.data` es `null`. El árbol sigue montado con la última lista leída (inerte,
   // sin consultar Core) y durante una reactivación mientras la lectura aún no tiene datos. Los snapshots
   // publicados al host siguen saliendo de `projects`, que sin una respuesta autoritativa queda vacío.
@@ -583,6 +587,7 @@ export function ProjectsSidebar({
       inert={!active}
       data-testid="projects-sidebar"
     >
+      {attentionCounts?.total > 0 && <button type="button" className="ade-core-needs" onClick={onOpenAttention} disabled={!onOpenAttention}><StatusIcon kind="attention" size={16} /><span><b>{attentionCounts.total} esperan tu decisión</b><small>{[['approval', 'permisos'], ['question', 'preguntas'], ['review_ready', 'revisiones']].filter(([key]) => attentionCounts.byCategory[key] > 0).map(([key, text]) => `${attentionCounts.byCategory[key]} ${text}`).join(', ')}</small></span></button>}
       <header className="ps__head">
         <h2 id={headingId} className="ps__title ps__sr-only">Proyectos</h2>
       </header>

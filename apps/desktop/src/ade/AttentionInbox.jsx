@@ -141,7 +141,7 @@ export function sumAttentionCounts(overview) {
   return { total, byCategory };
 }
 
-function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onBlur, onKeyDown, onOpenTarget }) {
+function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onBlur, onKeyDown, onOpenTarget, selected = false }) {
   const metaId = useId();
   const summary = toSummary(item);
   const category = label(CATEGORY_LABELS, item.category);
@@ -168,7 +168,7 @@ function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onBlur, 
     </>
   );
   const shared = {
-    className: 'attention-inbox__item',
+    className: `attention-inbox__item${selected ? ' is-selected' : ''}`,
     'data-attention-id': item.id,
     'data-target-kind': item.target_kind,
     'data-target-id': item.target_id,
@@ -177,16 +177,12 @@ function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onBlur, 
   };
   const accessibleName = `${severity}: ${category}. ${target}`;
   // La aprobación de un Attempt se decide aquí mismo (fuera del botón de la fila: no se anidan botones).
-  const decision = item.category === 'approval' && item.target_kind === 'attempt' && item.status === 'active'
-    ? <div className="attention-inbox__actions" data-testid="attention-launch-actions"><InboxLaunchApproval attemptId={item.target_id} /></div>
-    : null;
   if (!interactive) {
     return (
       <li className="attention-inbox__row">
         <div {...shared} role="group" aria-label={accessibleName} aria-describedby={metaId}>
           {content}
         </div>
-        {decision}
       </li>
     );
   }
@@ -202,11 +198,11 @@ function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onBlur, 
         onFocus={onFocus}
         onBlur={onBlur}
         onKeyDown={onKeyDown}
+        aria-pressed={selected}
         onClick={() => onOpenTarget(summary)}
       >
         {content}
       </button>
-      {decision}
     </li>
   );
 }
@@ -236,6 +232,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   const [projectId, setProjectId] = useState('');
   const [category, setCategory] = useState('');
   const [severity, setSeverity] = useState('');
+  const [selectedAttentionId, setSelectedAttentionId] = useState(null);
   // El target (kind + id durable) lo filtra el Core; `seq` identifica cada apertura explícita, de modo que
   // un stale/reconnect conserva target y filtros y una apertura nueva parte sin filtros heredados.
   const targetKind = target?.kind || '';
@@ -565,6 +562,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   const targetName = target ? `${label(TARGET_LABELS, target.kind)} ${target.id}` : '';
   const interactive = typeof onOpenTarget === 'function';
   const activeIndex = Math.min(focusIndex, Math.max(items.length - 1, 0));
+  const selectedAttention = items.find((item) => item.id === selectedAttentionId) ?? items[activeIndex] ?? null;
 
   return (
     <section
@@ -578,8 +576,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
     >
       <header className="attention-inbox__head">
         <div className="attention-inbox__heading">
-          <h2 id={titleId} className="attention-inbox__title">Attention</h2>
-          <p className="attention-inbox__subtitle">Lo que necesita de ti ahora, según el Core. Solo lectura, salvo aprobar o rechazar un intento nuevo.</p>
+          <h2 id={titleId} className="attention-inbox__title">Esperan tu decisión</h2>
         </div>
         <div
           className="attention-inbox__total"
@@ -600,7 +597,8 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
         </div>
       </header>
 
-      <div className="attention-inbox__filters" role="group" aria-label="Filtros de Attention">
+      <nav className="attention-design-filters" aria-label="Tipo de decisión">{[['', 'Todo'], ['approval', 'Permisos'], ['review_ready', 'Revisiones']].map(([value, text]) => <button type="button" key={value} aria-pressed={category === value} onClick={() => setCategory(value)}>{text}</button>)}</nav>
+      <details className="attention-design-advanced"><summary>Más filtros</summary><div className="attention-inbox__filters" role="group" aria-label="Filtros de Attention">
         <label className="attention-inbox__filter" htmlFor={projectFilterId}>
           <span>Project</span>
           <select
@@ -656,7 +654,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
         <button type="button" className="lk attention-inbox__clear" onClick={clearFilters} disabled={!hasFilters}>
           Limpiar filtros
         </button>
-      </div>
+      </div></details>
 
       {target && (
         <div className="attention-inbox__target-filter" role="group" aria-label="Filtro por target">
@@ -716,6 +714,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
       )}
 
       {items.length > 0 && (
+        <div className="attention-design-split">
         <ul
           className="attention-inbox__list"
           aria-label="Attention activa"
@@ -725,13 +724,15 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
             <AttentionItem
               key={item.id}
               item={item}
-              interactive={interactive}
+              interactive
+              selected={selectedAttention?.id === item.id}
               tabIndex={index === activeIndex ? 0 : -1}
               itemRef={(node) => { itemRefs.current[index] = node; }}
               onFocus={() => {
                 pendingFocus.current = null;
                 focusedItem.current = { id: item.id, createdAt: item.created_at, hasDOMFocus: true };
                 setFocusIndex(index);
+                setSelectedAttentionId(item.id);
               }}
               onBlur={(event) => {
                 const listElement = event.currentTarget.parentElement?.parentElement;
@@ -742,10 +743,22 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
                 focusedItem.current = { ...focusedItem.current, hasDOMFocus: false };
               }}
               onKeyDown={(event) => onItemKeyDown(event, index)}
-              onOpenTarget={onOpenTarget}
+              onOpenTarget={() => setSelectedAttentionId(item.id)}
             />
           ))}
         </ul>
+        <section className="attention-design-detail" aria-label="Detalle de la decisión">
+          {selectedAttention && <>
+            <span className="attention-design-kind"><StatusIcon kind={attentionKind(selectedAttention.category)} size={16} />{label(CATEGORY_LABELS, selectedAttention.category)} · {label(SEVERITY_LABELS, selectedAttention.severity)}</span>
+            <h2>{label(TARGET_LABELS, selectedAttention.target_kind)} {selectedAttention.target_id}</h2>
+            <p>{CATEGORY_HINTS[selectedAttention.category]}</p>
+            <dl><dt>Proyecto</dt><dd>{selectedAttention.project_id || 'Sin proyecto'}</dd><dt>Qué hace</dt><dd>No informado</dd><dt>Por qué</dt><dd>No informado</dd><dt>Alcance</dt><dd>No informado</dd></dl>
+            {['approval', 'question'].includes(selectedAttention.category) && selectedAttention.target_kind === 'attempt' && selectedAttention.status === 'active' && <div data-testid="attention-launch-actions"><InboxLaunchApproval key={selectedAttention.id} attemptId={selectedAttention.target_id} /></div>}
+            {interactive && <button type="button" className="btn btn--ghost" onClick={() => onOpenTarget(toSummary(selectedAttention))}>Abrir el detalle</button>}
+            <details className="attention-design-technical"><summary>Detalles de la decisión</summary><p>Identificador: {selectedAttention.id}</p><p>Ocurrencia: {selectedAttention.occurrence}</p>{selectedAttention.run_id && <p>Run: {selectedAttention.run_id}</p>}</details>
+          </>}
+        </section>
+        </div>
       )}
 
       {canLoadMore && (
@@ -768,10 +781,10 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
         </div>
       )}
 
-      <p className="attention-inbox__note">
+      <details className="attention-design-technical"><summary>Acerca de las decisiones</summary><p className="attention-inbox__note">
         Las filas se resuelven con el Command de su dominio (responder, aprobar, revisar…). Esta vista solo permite
         aprobar o rechazar el primer intento; no resuelve nada más, no pospone y no marca como leído.
-      </p>
+      </p></details>
       <span className="attention-inbox__sr" role="status" aria-live="polite">
         {target
           ? (hasData && totalValue !== '—'

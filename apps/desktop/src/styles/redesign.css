@@ -130,3 +130,16 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 @media (max-width: 760px) { [data-ui='ide'] .prob__row { flex-wrap: wrap; } [data-ui='ide'] .sm__body { padding: 16px; } }
 @media (min-width: 1180px) { [data-ui='ide'] .modeswitch { --tab-w: 82px; } [data-ui='ide'] .modeswitch__label { display: inline; } }
 [data-ui='ide'] .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+/* IDE conectado: controles secundarios plegados y revisión al pie. */
+[data-ui='ide'] .hist__tools { padding: 0 var(--panel-box) 4px; font-size: 13px; color: var(--ink-muted); }
+[data-ui='ide'] .hist__tools > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 12px; }
+[data-ui='ide'] .hist__tools[open] > summary { margin-bottom: 6px; }
+[data-ui='ide'] .hist__tools .hist__search { padding: 0; }
+[data-ui='ide'] .hist__tools .hist__filters { margin: 8px 0; }
+[data-ui='ide'] .hist__labelcount { margin-left: 8px; font-variant-numeric: tabular-nums; }
+[data-ui='ide'] .changes__actions { margin-top: auto; padding: 8px; justify-content: flex-start; gap: 8px; }
+[data-ui='ide'] .changes__actions > .panelhead__fill { display: none; }
+[data-ui='ide'] .changes__path { font-family: var(--font-interface); font-size: 14px; }
+[data-ui='ide'] .changes__summary { padding: 8px 20px; font-size: 13px; }
+[data-ui='ide'] .changes__row { margin: 0 8px; width: calc(100% - 16px); padding: 8px 12px; border-radius: 6px; gap: 10px; }
+[data-ui='ide'] .changes__row.is-active { background: var(--surface-3); }

@@ -47,7 +47,7 @@ function Row({ label, children }) {
   return (<><dt>{label}</dt><dd>{children}</dd></>);
 }
 
-export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true }) {
+export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true, requestedTab = null }) {
   const enabled = Boolean(active && attemptId && coreModel?.vNext);
   // Mientras el intento está activo se relee deprisa: «Detener», la cola y los avisos dependen de verlo `running` a tiempo (con el sondeo
   // normal, de 15 s, un intento corto terminaba antes de pintarse como activo).
@@ -58,6 +58,7 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
   useEffect(() => { setFast(ACTIVE_ATTEMPT_STATUSES.includes(liveStatus)); }, [liveStatus]);
   const attempt = state.data?.attempt ?? null;
   const [detailTab, setDetailTab] = useState('activity');
+  useEffect(() => { if (requestedTab?.tab === 'changes') setDetailTab('changes'); }, [requestedTab]);
 
   let body;
   if (!coreModel?.vNext) {

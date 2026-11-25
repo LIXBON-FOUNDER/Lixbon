@@ -196,6 +196,7 @@ export function HistoryList() {
 
   return (
     <div className="hist">
+      <details className="hist__tools"><summary><IconSearch size={14} />Buscar y filtrar</summary>
       <div className="hist__search">
         <div className="field">
           <IconSearch size={15} />
@@ -221,6 +222,7 @@ export function HistoryList() {
           );
         })}
       </div>
+      </details>
       {error && <span className="hist__error">{error}</span>}
 
       <div className="hist__list scroll">

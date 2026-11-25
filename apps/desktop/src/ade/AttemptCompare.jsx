@@ -6,6 +6,8 @@ import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { Mark, PROVENANCE_VIEW } from './ProvenanceMark';
 import { useCoreQuery } from './useCoreQuery';
 import './AttemptCompare.css';
+import { ProviderMark } from '../orch/agent/ProviderMark';
+import { providerName } from '../orch/agent/agentIdentity';
 
 /**
  * LXO-154 · Comparar 2–4 Attempts con la evidencia estructurada del Core (`attempt_compare`). SOLO LECTURA: no puntúa, no elige ganador, no
@@ -37,6 +39,23 @@ function Cell({ evidence, render, id }) {
 function selectionText(s) {
   const parts = [s.provider, s.model, s.effort, s.role].filter(Boolean);
   return `${parts.join(' · ')}${s.external ? ' · externo' : ''}`;
+}
+
+function ComparisonCards({ attempts, onOpenAttempt }) {
+  return <div className="cmp-design-cards">{attempts.map((attempt) => {
+    const selection = attempt.selection.provenance !== 'unknown' ? attempt.selection.value : null;
+    return <article className="cmp-design-card" key={attempt.attempt_id}>
+      <header>{selection && <ProviderMark provider={selection.provider} size={18} />}<h4>{selection ? providerName(selection.provider) : 'Agente no informado'} <span>· Intento {attempt.n}</span></h4>{attempt.status.provenance !== 'unknown' && <StatusText info={attemptStatusInfo(attempt.status.value.status)} />}</header>
+      <dl>
+        <dt>Pruebas</dt><dd>{attempt.tests.provenance === 'unknown' ? 'No informado' : <>{String(attempt.tests.value)} <Mark provenance={attempt.tests.provenance} /></>}</dd>
+        <dt>Cambios</dt><dd>{attempt.changes.files.provenance === 'unknown' ? 'No informado' : <Files changes={attempt.changes} />}</dd>
+        <dt>Coste</dt><dd>No informado</dd>
+        <dt>Tiempo</dt><dd>{attempt.timing.provenance !== 'unknown' && Number.isSafeInteger(attempt.timing.value.duration_ms) ? formatDurationMs(attempt.timing.value.duration_ms) : 'No informado'}</dd>
+      </dl>
+      <p>{attempt.summary.provenance === 'unknown' ? 'Resumen no informado.' : attempt.summary.value}</p>
+      {onOpenAttempt && <button type="button" className="btn btn--ghost" onClick={() => onOpenAttempt({taskId: attempt.task_id, attemptId: attempt.attempt_id})}>Elegir intento {attempt.n}</button>}
+    </article>;
+  })}</div>;
 }
 
 function Files({ changes }) {
@@ -141,7 +160,10 @@ export function AttemptCompare({ attemptIds, onOpenAttempt, onClose, active = tr
       </div>
       {response ? (
         <>
-          <p className="cmp-note" data-testid="cmp-relation">{RELATION_TEXT[response.relation.kind]} Es solo una comparación: no cambia nada ni elige un ganador.</p>
+          <p className="cmp-note" data-testid="cmp-relation">{RELATION_TEXT[response.relation.kind]}</p>
+          <ComparisonCards attempts={response.attempts} onOpenAttempt={onOpenAttempt} />
+          <p className="cmp-design-suggestion">Sugerencia: no informada. Abre un intento para revisar su evidencia antes de integrarlo.</p>
+          <details className="cmp-design-evidence"><summary>Procedencia y comparación completa</summary>
           <ul className="cmp-legend" aria-label="Cómo se sabe cada dato">
             {Object.entries(PROVENANCE_VIEW).map(([key, view]) => (
               <li key={key} className={`cmp-prov cmp-prov--${key}`}><span aria-hidden="true">{view.glyph}</span> {view.label}</li>
@@ -182,6 +204,7 @@ export function AttemptCompare({ attemptIds, onOpenAttempt, onClose, active = tr
             </table>
           </div>
           <Overlaps overlaps={response.overlaps} />
+          </details>
         </>
       ) : state.error ? (
         <CoreModelNotice error={state.error} onRetry={state.retry} />
