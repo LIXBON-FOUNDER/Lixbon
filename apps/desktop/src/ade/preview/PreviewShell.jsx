@@ -1,3 +1,4 @@
+import { AdeActivityRail } from '../AdeActivityRail';
 // PreviewShell.jsx — la vista previa del ADE dentro del modo Orquestar, con el mismo marco que AdeShell:
 // navegador a la izquierda (Collapse + Panel), lienzo con las vistas en el centro e Inspector en el RightDock.
 // Los botones de paneles de la barra de título la gobiernan igual que al ADE real.
@@ -24,8 +25,8 @@ import '../AdeShell.css';
 import './preview.css';
 
 const VIEWS = [
-  { id: 'workspace', label: 'Workspace', icon: 'panel' },
-  { id: 'attention', label: 'Attention', icon: 'warn' },
+  { id: 'workspace', label: 'Intento', icon: 'panel' },
+  { id: 'attention', label: 'Atención', icon: 'warn' },
   { id: 'compare', label: 'Comparar', icon: 'split' },
   { id: 'map', label: 'Mapa', icon: 'nodes' },
   { id: 'hosts', label: 'Hosts', icon: 'server' },
@@ -79,10 +80,11 @@ export function PreviewShell({ leftOpen = true, rightOpen = true, drawerOpen, on
   const sub = view === 'proof' || view === 'review' || view === 'compare';
   return (
     <div className="wb wb--orch ade__layout pv-shell" data-testid="ade-preview">
+      <AdeActivityRail view={view} onSelect={setView} hostsAvailable needsAttention={attention > 0} />
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead">
-            <span className="panelhead__title">Orquestador</span>
+            <span className="panelhead__title">Trabajo</span>
             <span className="panelhead__fill" />
             <AdeSourceSwitch />
           </div>

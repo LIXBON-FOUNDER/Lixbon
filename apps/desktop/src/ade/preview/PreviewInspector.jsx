@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // PreviewInspector.jsx — panel derecho. No repite el navegador: responde «¿qué debía lograr esto,
 // con qué contexto y con qué permisos?».
 import { useState } from 'react';
@@ -25,8 +26,8 @@ function TaskTab({ task }) {
       {task.constraints.length > 0 && <Section title="Restricciones"><ul className="pv-insp__list pv-insp__list--plain">{task.constraints.map((c) => <li key={c}>{c}</li>)}</ul></Section>}
       {task.decisions.length > 0 && <Section title="Decisiones tomadas"><ul className="pv-insp__list pv-insp__list--plain">{task.decisions.map((c) => <li key={c}>{c}</li>)}</ul></Section>}
       {task.run && (
-        <Section title="Coordinador" aside={<span className="pv-tag pv-tag--dim">Run</span>}>
-          <p className="pv-insp__p">Forma parte de <b>{task.run}</b>. Tasks hermanas: {siblings.map((c) => c.title).join(', ') || '—'}.</p>
+        <Section title="Tarea principal">
+          <p className="pv-insp__p">Forma parte de <b>{task.run}</b>{siblings.length > 0 && <>, junto con {siblings.map((c) => c.title).join(' e ')}</>}.</p>
         </Section>
       )}
     </>
@@ -45,7 +46,7 @@ function ChangesTab({ a }) {
       <Section title="Archivos">
         {files ? (
           <ul className="pv-insp__files">
-            {files.slice(0, 8).map((f) => <li key={f.path} className={rv.reviewed[f.path] ? 'is-done' : ''}><span className={`pv-riskdot pv-riskdot--${f.risk}`} title={`riesgo ${f.risk}`} /><span className="mono pv-trunc">{f.path}</span><span className="pv-good mono">+{f.add}</span><span className="pv-bad mono">−{f.del}</span></li>)}
+            {files.slice(0, 8).map((f) => <li key={f.path} className={rv.reviewed[f.path] ? 'is-done' : ''}><span className={`pv-riskdot pv-riskdot--${f.risk}`} title={`riesgo ${f.risk}`} /><FileIcon nombre={f.path} size={16} /><span className="mono pv-trunc">{f.path}</span><span className="pv-good mono">+{f.add}</span><span className="pv-bad mono">−{f.del}</span></li>)}
             {files.length > 8 && <li className="pv-muted">+{files.length - 8} más en la revisión</li>}
           </ul>
         ) : <p className="pv-muted pv-insp__p">La lista detallada está en la revisión.</p>}
@@ -115,9 +116,9 @@ export function PreviewInspector() {
   const task = taskOf(s, a);
   return (
     <>
-      <div className="panelhead"><span className="panelhead__title">Inspector</span><span className="panelhead__meta">{task.title} · Intento {a.label}</span></div>
+      <div className="panelhead"><span className="panelhead__title">Inspector</span><span className="panelhead__fill" /><span className="panelhead__meta">Intento {a.label}</span></div>
       <div className="pv-insp__tabs">
-        <Tabs value={tab} onChange={setTab} label="Inspector" options={[{ id: 'task', label: 'Task' }, { id: 'changes', label: 'Cambios' }, { id: 'context', label: 'Contexto' }, { id: 'autonomy', label: 'Autonomía' }]} />
+        <Tabs value={tab} onChange={setTab} label="Inspector" options={[{ id: 'task', label: 'Tarea' }, { id: 'changes', label: 'Cambios' }, { id: 'context', label: 'Contexto' }, { id: 'autonomy', label: 'Autonomía' }]} />
       </div>
       <div className="ade__inspector-content scroll">
         {tab === 'task' && <TaskTab task={task} />}

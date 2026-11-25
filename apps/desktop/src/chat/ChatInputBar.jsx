@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // ChatInputBar.jsx — caja de entrada del chat (crema, redondeada, según diseño web)
 // con menciones de archivo (@) y selector de modelo.
 //
@@ -385,7 +386,7 @@ export function ChatInputBar() {
         <div className="chat-inputbar__chips">
           {mentions.map((m) => (
             <span key={m.path} className="ctx-chip" title={m.rel}>
-              <IconFileCode size={13} />
+              <FileIcon nombre={m.path} size={16} />
               @{m.name}
               <button
                 onClick={() => setMentions((prev) => prev.filter((x) => x.path !== m.path))}
@@ -415,7 +416,7 @@ export function ChatInputBar() {
               onPointerEnter={() => setMentionSel(i)}
               onMouseDown={(e) => { e.preventDefault(); pickMention(f); }}
             >
-              <IconFileCode size={13} />
+              <FileIcon nombre={f.path} size={16} />
               <span className="mention-menu__name">{f.name}</span>
               <span className="mention-menu__rel">{f.rel}</span>
             </div>
@@ -436,13 +437,7 @@ export function ChatInputBar() {
       <textarea
         ref={textareaRef}
         className="chat-inputbar__textarea"
-        placeholder={isClaude ? (!agentActive ? 'Abre una carpeta de trabajo para usar Claude Code'
-          : streaming ? 'Claude está trabajando: lo que envíes queda en cola, /btw para preguntar al margen'
-            : 'Pídele algo a Claude Code, @ para mencionar un archivo')
-          : !agentActive ? 'Pregunta lo que quieras, / para comandos'
-          : chatMode === 'plan' ? 'Describe qué quieres hacer y el agente propondrá un plan'
-            : chatMode === 'ask' ? 'Pregunta sobre el código, @ para mencionar un archivo'
-              : 'Pide algo, @ para mencionar un archivo, / para comandos'}
+        placeholder={isClaude && !agentActive ? 'Abre una carpeta de trabajo para usar Claude Code' : 'Responde o pide un cambio…'}
         rows={1}
         value={text}
         onChange={onChange}
