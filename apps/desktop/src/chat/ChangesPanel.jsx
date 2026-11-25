@@ -135,12 +135,12 @@ function ChangesTab() {
         {current?.pending && (
           <>
             <button className="btn btn--ghost btn--sm" onClick={() => accept(current)}>Aceptar</button>
-            <button className="lk" onClick={() => revert(current)}>Revertir</button>
+            <button className="lk" onClick={() => revert(current)}>Descartar</button>
           </>
         )}
         <div className="panelhead__fill" />
         {current && current.kind !== 'delete' && !current.reverted && (
-          <button className="lk" onClick={() => openInEditor(current)}>Abrir en editor</button>
+          <button className="lk" onClick={() => openInEditor(current)}>Revisar</button>
         )}
       </div>
       {pendingFiles.length > 1 && (

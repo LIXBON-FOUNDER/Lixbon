@@ -33,8 +33,8 @@ const GROUPS = [
     { id: 'usage', label: 'Uso y límites', icon: IconChart, keywords: 'uso consumo cupo sesion semana tokens plan', Page: UsagePage },
   ] },
   { label: 'Inteligencia', items: [
-    { id: 'agent', label: 'Agente y permisos', icon: IconShield, keywords: 'agente permisos aprobar comandos permitidos allowlist herramientas autonomia modo', Page: AgentPage },
-    { id: 'orch', label: 'Orquestador', icon: IconNodes, keywords: 'orquestador agentes coordinador hijos roles explorador implementador revisor skill lxo worktree experimental', Page: OrchestratorPage },
+    { id: 'agent', label: 'Agentes y permisos', icon: IconShield, keywords: 'agente permisos aprobar comandos permitidos allowlist herramientas autonomia modo', Page: AgentPage },
+    { id: 'orch', label: 'ADE', icon: IconNodes, keywords: 'orquestador agentes coordinador hijos roles explorador implementador revisor skill lxo worktree experimental', Page: OrchestratorPage },
     { id: 'mcp', label: 'Servidores MCP', icon: IconMcp, keywords: 'mcp servidores extensiones herramientas github postgres playwright importar claude cursor vscode', Page: McpPage },
     { id: 'skills', label: 'Skills', icon: IconBook, keywords: 'skills comandos catalogo instalar adversary marketing calificar version', Page: SkillsPage },
   ] },

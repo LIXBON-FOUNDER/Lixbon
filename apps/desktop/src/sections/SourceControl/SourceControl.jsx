@@ -214,11 +214,11 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
             onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey && canCommit) run(commit); }}
           />
           <button className="lk scm2__gen" onClick={() => run(generateMessage)} disabled={generating || changes.length === 0}>
-            {generating ? <SpinRing size={11} /> : <LogoMark size={11} />} Generar mensaje
+            {generating ? <SpinRing size={14} /> : <LogoMark size={14} />} Escribir el mensaje con el agente
           </button>
         </div>
         <div className="scm2__commitrow">
-          <button className="btn btn--primary" onClick={() => run(commit)} disabled={!canCommit} title="Ctrl ↵">Commit{staged.length ? ` (${staged.length})` : ''}</button>
+          <button className="btn btn--primary" onClick={() => run(commit)} disabled={!canCommit} title="Ctrl ↵">Hacer commit en {branch || 'la rama'}</button>
           <button className="btn btn--ghost" onClick={() => run(commitAndPush)} disabled={!canCommit || !hasRemote}>Commit y push</button>
           {netLabel && <span className="scm2__muted">{netLabel}…</span>}
         </div>
@@ -249,7 +249,7 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
         )}
         <section className="scm2__group">
           <div className="scm2__grouphead">
-            <span>Cambios</span><span className="count">{unstaged.length}</span>
+            <span>Sin preparar</span><span className="count">{unstaged.length}</span>
             <div className="panelhead__fill" />
             {unstaged.length > 0 && <button className="lk" onClick={stageAll}>Preparar todos</button>}
           </div>

@@ -437,13 +437,7 @@ export function ChatInputBar() {
       <textarea
         ref={textareaRef}
         className="chat-inputbar__textarea"
-        placeholder={isClaude ? (!agentActive ? 'Abre una carpeta de trabajo para usar Claude Code'
-          : streaming ? 'Claude está trabajando: lo que envíes queda en cola, /btw para preguntar al margen'
-            : 'Pídele algo a Claude Code, @ para mencionar un archivo')
-          : !agentActive ? 'Pregunta lo que quieras, / para comandos'
-          : chatMode === 'plan' ? 'Describe qué quieres hacer y el agente propondrá un plan'
-            : chatMode === 'ask' ? 'Pregunta sobre el código, @ para mencionar un archivo'
-              : 'Pide algo, @ para mencionar un archivo, / para comandos'}
+        placeholder={isClaude && !agentActive ? 'Abre una carpeta de trabajo para usar Claude Code' : 'Responde o pide un cambio…'}
         rows={1}
         value={text}
         onChange={onChange}

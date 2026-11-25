@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // ToolGroup.jsx — actividad del agente en UNA línea por tramo de tool calls.
 // Mientras corre, la línea cuenta en palabras lo que hace ahora («Revisando el
 // diff»), con una ola de color que recorre las letras; al terminar queda el
@@ -79,6 +80,7 @@ function ActivityRow({ message, index, delay }) {
       <div className="activity-row__line">
         <ActivityIcon pending={pending} />
         <span className="activity-row__verb">{verb}</span>
+        {a.path && <FileIcon nombre={a.path} size={16} />}
         {target && <span className="activity-row__target">{target}</span>}
         {change && (change.added > 0 || change.removed > 0) && (
           <span className="activity-row__counts">
@@ -170,7 +172,7 @@ export function ToolGroup({ messages, startIndex }) {
   const answered = messages.filter((m) => m.answers?.length > 0);
 
   return (
-    <div className={`actline-group ${open ? 'is-open' : ''}`}>
+    <div className={`actline-group ${running ? 'is-running' : 'is-complete'} ${open ? 'is-open' : ''}`}>
       <button
         className={`actline ${running ? 'is-running' : ''} ${failed && !running ? 'is-err' : ''}`}
         onClick={() => setOpen((v) => !v)}
@@ -178,7 +180,7 @@ export function ToolGroup({ messages, startIndex }) {
         title={open ? 'Ocultar el detalle' : 'Ver el detalle'}
       >
         <span className="actline__icon" aria-hidden="true">
-          {running ? <LogoMark size={14} motion={toolMotion(messages[pendingIdx].tool)} /> : <span className={`actline__mark ${failed ? 'is-err' : ''}`} />}
+          {running && <LogoMark size={14} motion={toolMotion(messages[pendingIdx].tool)} />}
         </span>
         {running ? <WaveText key={text} text={text} /> : <span className="actline__text">{text}</span>}
         <span className="actline__meta">

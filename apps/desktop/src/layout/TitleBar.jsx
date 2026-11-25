@@ -224,8 +224,13 @@ function SearchExpand() {
         <input
           ref={inputRef}
           className="tsearch__input"
+          role="combobox"
+          aria-label="Busca archivos, comandos o agentes"
+          aria-expanded={open}
+          aria-controls={open ? 'global-search-results' : undefined}
+          aria-activedescendant={open && results[sel] && results[sel].kind !== 'note' ? `global-search-result-${sel}` : undefined}
           value={query}
-          placeholder={open ? 'Archivos, comandos o pregunta al agente' : 'Buscar o ejecutar'}
+          placeholder={open ? 'Busca archivos, comandos o agentes' : 'Buscar o ejecutar'}
           readOnly={!open}
           tabIndex={open ? 0 : -1}
           onChange={(e) => setQuery(e.target.value)}
@@ -235,12 +240,16 @@ function SearchExpand() {
         <span className="tsearch__kbd">Ctrl K</span>
       </div>
       <Popover anchorRef={boxRef} open={open} onClose={collapse} align="left" className="menu tsearch__results">
+        <div role="listbox" id="global-search-results" aria-label="Resultados">
         {results.map((r, i) => (
           r.kind === 'note'
             ? <div key={r.key} className="menu__empty">{r.label}</div>
             : (
               <button
                 key={`${r.kind}:${r.key}`}
+                id={`global-search-result-${i}`}
+                role="option"
+                aria-selected={i === sel}
                 className={`menu__item ${i === sel ? 'is-selected' : ''}`}
                 onMouseEnter={() => setSel(i)}
                 onMouseDown={(e) => e.preventDefault()}
@@ -256,6 +265,7 @@ function SearchExpand() {
               </button>
             )
         ))}
+        </div>
         <div className="tsearch__prefixes">
           {PREFIXES.map((p) => (
             <button key={p.key} className="tsearch__prefix" onMouseDown={(e) => e.preventDefault()} onClick={() => { setQuery(p.key); inputRef.current?.focus(); }}>

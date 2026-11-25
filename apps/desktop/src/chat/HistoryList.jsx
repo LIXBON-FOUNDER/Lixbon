@@ -248,21 +248,9 @@ export function HistoryList() {
                   />
                 ) : (
                   <button className="hist__btn" onClick={() => openItem(c)} title={c.title}>
-                    {(() => {
-                      const eng = c.live ? (open.find((o) => o.key === c.key)?.engine || 'lixbon') : engineKey(c);
-                      const Mark = engineOf(eng).Mark;
-                      const working = c.streaming && !c.waiting;
-                      return (
-                        <>
-                          <StatusIcon kind={working ? "working" : "agent"} size={16} />
-                          {c.waiting && <StatusIcon kind="permission" size={16} label="Espera tu permiso" />}
-                          {c.live && !c.streaming && !c.waiting && <StatusIcon kind="done" size={16} label="Terminó" />}
-                          {!working && (eng !== 'lixbon' || filter === 'all') && <span className="hist__mark" title={engineOf(eng).label}><Mark size={11} /></span>}
-                        </>
-                      );
-                    })()}
-                    <span className="hist__title">{c.title || 'Nueva conversación'}</span>
-                    <span className="hist__time">{c.waiting ? 'permiso' : c.streaming ? 'ahora' : c.live ? 'listo' : relTime(c.updated_at)}</span>
+                    <StatusIcon kind={c.waiting ? 'permission' : c.streaming ? 'working' : c.live ? 'done' : 'agent'} size={16} />
+                    <span className="hist__copy"><span className="hist__title">{c.title || 'Nueva conversación'}</span><span className="hist__subtitle">{c.waiting ? 'te pide permiso' : c.streaming ? 'trabajando' : c.live ? 'hecho' : relTime(c.updated_at)}</span></span>
+
                   </button>
                 )}
                 {!c.live && renamingId !== c.id && engineKey(c) !== 'codex' && (
