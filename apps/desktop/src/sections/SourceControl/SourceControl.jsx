@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // SourceControl.jsx — panel izquierdo del modo Git: rama, mensaje de commit
 // (con propuesta del modelo), cambios preparados y sin preparar, historial y
 // el estado del pull request de la rama.
@@ -27,7 +28,7 @@ function FileRow({ c, active, stat, onOpen, onStage, onDiscard }) {
   return (
     <div className={`scm2__file ${active ? 'is-active' : ''}`}>
       <button className="scm2__fileopen" onClick={onOpen} title={c.path}>
-        <Badge c={c} />
+        <FileIcon nombre={c.path} size={16} /><Badge c={c} />
         <span className="scm2__name">{fileName(c.path)}</span>
         <span className="mono scm2__dir">{dirName(c.path)}</span>
       </button>

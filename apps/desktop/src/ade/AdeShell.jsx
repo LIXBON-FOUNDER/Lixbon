@@ -1,3 +1,4 @@
+import { AdeActivityRail } from './AdeActivityRail';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Collapse } from '../layout/Collapse';
 import { Gutter } from '../layout/Gutter';
@@ -930,6 +931,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
         </div>
       )}
       <div className="wb wb--orch ade__layout">
+      <AdeActivityRail view={workspaceView} onSelect={changeWorkspaceView} />
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span><AdeSourceSwitch /></div>

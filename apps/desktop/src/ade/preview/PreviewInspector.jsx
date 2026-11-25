@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // PreviewInspector.jsx — panel derecho. No repite el navegador: responde «¿qué debía lograr esto,
 // con qué contexto y con qué permisos?».
 import { useState } from 'react';
@@ -45,7 +46,7 @@ function ChangesTab({ a }) {
       <Section title="Archivos">
         {files ? (
           <ul className="pv-insp__files">
-            {files.slice(0, 8).map((f) => <li key={f.path} className={rv.reviewed[f.path] ? 'is-done' : ''}><span className={`pv-riskdot pv-riskdot--${f.risk}`} title={`riesgo ${f.risk}`} /><span className="mono pv-trunc">{f.path}</span><span className="pv-good mono">+{f.add}</span><span className="pv-bad mono">−{f.del}</span></li>)}
+            {files.slice(0, 8).map((f) => <li key={f.path} className={rv.reviewed[f.path] ? 'is-done' : ''}><span className={`pv-riskdot pv-riskdot--${f.risk}`} title={`riesgo ${f.risk}`} /><FileIcon nombre={f.path} size={16} /><span className="mono pv-trunc">{f.path}</span><span className="pv-good mono">+{f.add}</span><span className="pv-bad mono">−{f.del}</span></li>)}
             {files.length > 8 && <li className="pv-muted">+{files.length - 8} más en la revisión</li>}
           </ul>
         ) : <p className="pv-muted pv-insp__p">La lista detallada está en la revisión.</p>}

@@ -1,3 +1,4 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // PreviewSidebar.jsx — navegación Project → Task → Intento (worktree + agente) de la vista previa.
 //  · 1 Intento  → la Task es una sola fila.  N Intentos → la Task es un grupo.
 //  · Estado (forma) y Attention (marcador ámbar) son ejes distintos; «sin leer» es un tercero (punto).
@@ -174,9 +175,9 @@ export function PreviewSidebar() {
       )}
 
       <button type="button" className={`pv-need${s.view === 'attention' ? ' is-sel' : ''}${total ? '' : ' is-calm'}`} onClick={() => s.setView('attention')}>
-        <span className="pv-need__n mono">{total}</span>
+        <StatusIcon kind="attention" size={16} />
         <span className="pv-need__text">
-          <b>{total ? `${total === 1 ? 'Espera' : 'Esperan'} tu decisión` : 'Nada espera tu decisión'}</b>
+          <b>{total ? `${total} ${total === 1 ? 'espera' : 'esperan'} tu decisión` : 'Nada espera tu decisión'}</b>
           <small>{byKind || 'Los agentes trabajan dentro de su contrato.'}</small>
         </span>
         <I n="right" size={12} />

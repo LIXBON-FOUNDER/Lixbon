@@ -1,5 +1,5 @@
-/* base.css — fuente de marca, design tokens y reset del IDE.
-   Hanken Grotesk y JetBrains Mono llegan self-hosted vía @fontsource (main.jsx). */
+/* base.css — fuentes, tokens y reset. La marca llega de shared/fonts;
+   JetBrains Mono sigue siendo la fuente de código y terminal. */
 
 /* ── Fuentes ─────────────────────────────────────────────────────────── */
 
@@ -28,6 +28,7 @@
 :root,
 [data-theme='dark'] {
   color-scheme: dark;
+
 
   --surface-0: #070707;
   --surface-1: #111111;
@@ -186,20 +187,20 @@
 
 .errboundary__card h1 {
   margin: 0 0 4px;
-  font-size: 18px;
+  font-size: var(--text-input, 18px);
   color: var(--danger);
 }
 
 .errboundary__hint {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--text-meta, 13px);
   color: var(--ink-soft);
 }
 
 .errboundary__msg,
 .errboundary__stack {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-meta, 12px);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   background: var(--bg);
@@ -222,7 +223,7 @@
 }
 
 .errboundary__actions button {
-  font-size: 13px;
+  font-size: var(--text-meta, 13px);
   padding: 6px 14px;
   border-radius: var(--radius-pill);
   color: var(--ink);
@@ -254,7 +255,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-meta, 13px);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow: hidden; /* ventana de app: el scroll vive en los paneles */
@@ -292,7 +293,7 @@ p {
 .brand {
   font-family: var(--font-brand);
   letter-spacing: 0.04em;
-  font-size: 30px;
+  font-size: var(--text-input, 30px);
 }
 
 .pill-btn {
@@ -374,7 +375,7 @@ p {
 }
 
 .app-loading__logo {
-  font-size: 30px;
+  font-size: var(--text-input, 30px);
   animation: loading-pulse 1.6s ease-in-out infinite;
 }
 
@@ -475,4 +476,13 @@ p {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+:root {
+  --panel-box: 8px;
+  --panel-text: 20px;
+  --icon-col: 28px;
+  --label-line: 46px;
+  --tree-step: 21px;
+  --menu-box: 6px;
 }

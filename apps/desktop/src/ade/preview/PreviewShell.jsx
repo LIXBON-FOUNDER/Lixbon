@@ -1,3 +1,4 @@
+import { AdeActivityRail } from '../AdeActivityRail';
 // PreviewShell.jsx — la vista previa del ADE dentro del modo Orquestar, con el mismo marco que AdeShell:
 // navegador a la izquierda (Collapse + Panel), lienzo con las vistas en el centro e Inspector en el RightDock.
 // Los botones de paneles de la barra de título la gobiernan igual que al ADE real.
@@ -79,6 +80,7 @@ export function PreviewShell({ leftOpen = true, rightOpen = true, drawerOpen, on
   const sub = view === 'proof' || view === 'review' || view === 'compare';
   return (
     <div className="wb wb--orch ade__layout pv-shell" data-testid="ade-preview">
+      <AdeActivityRail view={view} onSelect={setView} hostsAvailable needsAttention={attention > 0} />
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead">
