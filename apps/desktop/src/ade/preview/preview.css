@@ -459,3 +459,6 @@ details > summary.pv-pp__h { cursor: pointer; list-style: none; }
   .pvmk-arc, .pvmk-dot, .pvmk-blink { animation: none; }
   .pv-row:active, .pv-strip__t:active, .pv-need:active, .pv-chipbtn:active, .pv-node:active, .pv-composer__mode:active { transform: none; }
 }
+
+.pv-attn { padding: 0; background: none; color: var(--warn); }
+.pv-attn.is-high { background: none; color: var(--danger-ink); }

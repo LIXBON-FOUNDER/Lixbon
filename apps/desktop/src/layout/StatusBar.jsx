@@ -1,3 +1,4 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // StatusBar.jsx — línea de estado: git, agente, cursor, lenguaje y conexión.
 import { useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
@@ -71,13 +72,13 @@ export function StatusBar() {
       {changes.length > 0 && <span className="statusbar__item">{changes.length} cambios</span>}
       {(streaming || waiting) && (
         <button className="statusbar__item statusbar__item--agent" onClick={() => setMode('agent')}>
-          {waiting ? <span className="dot dot--pulse" /> : <LogoMark size={12} motion="destello" />}
+          <StatusIcon kind={waiting ? 'permission' : 'working'} size={16} />
           {waiting ? 'El agente espera tu respuesta' : title ? `${title} · trabajando` : 'Agente trabajando'}
         </button>
       )}
       {checker && (
         <button className={`statusbar__item ${errors ? 'statusbar__item--err' : ''}`} onClick={showProblems} title="Problemas">
-          {errors} {errors === 1 ? 'error' : 'errores'}{warnings ? ` · ${warnings} ${warnings === 1 ? 'aviso' : 'avisos'}` : ''}
+          {errors > 0 && <StatusIcon kind="code-error" size={16} />}{errors} {errors === 1 ? 'error' : 'errores'}{warnings ? ` · ${warnings} ${warnings === 1 ? 'aviso' : 'avisos'}` : ''}
         </button>
       )}
       {preview && (

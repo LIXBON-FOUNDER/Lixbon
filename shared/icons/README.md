@@ -62,3 +62,9 @@ Solo se activan al pulsar, nunca al pasar el cursor. Se mueve el icono, no el bo
 
 - **Un golpe:** el botón lleva `ia ia-<id>` y la clase que devuelve `usePulso()`.
 - **Interruptores** (flash, ojo, estrella, corazon, fijar, microfono, candado, tema, reproducir, copiar): el botón lleva `ia ia-<interruptor>` y la clase `on` cuando está activo. Dentro, el estado apagado va en `<span class="v-off">` y el encendido en `<span class="v-on">`.
+
+## Rediseño F1
+
+`@lixbon/icons/file-icons` exporta `FileIcon({nombre})` e `iconoDeArchivo(nombre)`; Metro selecciona automáticamente la versión React Native. `@lixbon/icons/file-icons/resolver` expone la misma extracción de extensión que usa el editor. Se resuelve por nombre, prueba y extensión, en ese orden; desconocidos conservan el documento gris. Los 37 tipos proceden de `design/boards/06-ide/IdeNuevoArchivos.dc.html`; `data.js` conserva el SVG y `nodes.js` su árbol para React.
+
+`@lixbon/icons/status` exporta `StatusIcon({kind, size, label})`. Los SVG salen de Atención, Hosts y Modo Agente. En web se importa también `@lixbon/icons/status/css`: anillo r=9, trazo 1,75, giro lineal de 900 ms y quieto con movimiento reducido. Sin `label` el icono es decorativo y acompaña al texto; con `label` tiene nombre accesible. Native conserva los mismos SVG; la animación corresponde al consumidor.
