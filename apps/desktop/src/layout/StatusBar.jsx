@@ -93,14 +93,14 @@ export function StatusBar() {
           onClick={() => { useSessionsStore.getState().activate((bgWaiting || background[0]).key); setMode('agent'); }}
           title="Agentes trabajando en otras conversaciones"
         >
-          {bgWaiting ? <span className="dot dot--accent dot--pulse" /> : <LogoMark size={12} motion="giro" />}
+          <StatusIcon kind={bgWaiting ? 'permission' : 'working'} size={16} />
           {bgWaiting ? `«${bgWaiting.title || 'Otro agente'}» espera tu permiso` : `${background.length} ${background.length === 1 ? 'agente más' : 'agentes más'} trabajando`}
         </button>
       )}
       <div className="statusbar__fill" />
       {mode === 'editor' && activePath && (
         <>
-          {cursor && <span className="statusbar__item">Ln {cursor.line}, Col {cursor.col}{cursor.selected ? ` (${cursor.selected} sel.)` : ''}</span>}
+          {cursor && <span className="statusbar__item">Lín. {cursor.line}, col. {cursor.col}{cursor.selected ? ` (${cursor.selected} sel.)` : ''}</span>}
           <span className="statusbar__item">UTF-8</span>
           <span className="statusbar__item statusbar__item--strong">{languageLabel(activePath)}</span>
         </>
@@ -113,8 +113,8 @@ export function StatusBar() {
           onClick={() => useAppStore.getState().openModal('settings', 'usage')}
           title={`Sesión ${Math.round(session.percent || 0)}% · ${resetLabel(session.reset_at)}`}
         >
-          <ProgressRing value={session.percent || 0} size={14} stroke={3} />
-          {Math.round(session.percent || 0)}%
+          <span className="statusbar__meter" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, session.percent || 0))}%` }} /></span>
+          {Math.round(session.percent || 0)} % usado
         </button>
       )}
       <span className={`statusbar__item statusbar__conn is-${connectionStatus}`}>

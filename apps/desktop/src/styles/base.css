@@ -477,3 +477,12 @@ p {
     transition-duration: 0.01ms !important;
   }
 }
+
+:root {
+  --panel-box: 8px;
+  --panel-text: 20px;
+  --icon-col: 28px;
+  --label-line: 46px;
+  --tree-step: 21px;
+  --menu-box: 6px;
+}

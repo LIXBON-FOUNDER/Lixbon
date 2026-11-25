@@ -418,7 +418,7 @@ export function FileTree() {
 
   const renderEntries = (entries, depth = 0, parentPath = rootPath) =>
     entries.map((entry) => {
-      const indent = depth * 14 + 10;
+      const indent = `calc(var(--panel-text) + ${depth} * var(--tree-step))`;
 
       if (renaming?.path === entry.path) {
         return <div key={entry.path}>{renameForm(indent)}</div>;
@@ -468,7 +468,7 @@ export function FileTree() {
         <div
           key={entry.path}
           className={`filetree__node ${activePath === entry.path || selected?.entry.path === entry.path ? 'is-active' : ''}`}
-          style={{ paddingLeft: indent + 17 }}
+          style={{ paddingLeft: `calc(${indent} + var(--tree-step))` }}
           draggable
           onDragStart={(e) => startDrag(e, entry, parentPath)}
           onDragOver={onLeafDragOver}

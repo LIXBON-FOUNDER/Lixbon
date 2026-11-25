@@ -1,3 +1,4 @@
+import '@lixbon/icons/css';
 import '@lixbon/icons/status/css';
 import React from "react";
 import ReactDOM from "react-dom/client";
