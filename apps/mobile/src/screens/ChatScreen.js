@@ -1,3 +1,6 @@
+import { ChangingText } from '../components/ChangingText';
+import { Pressable } from '../components/MotionPressable';
+import { LINEAS } from '../theme';
 import { FileIcon } from '@lixbon/icons/file-icons';
 import { TEXT } from '../theme';
 import { Text, TextInput } from '../components/Typography';
@@ -6,8 +9,8 @@ import { Text, TextInput } from '../components/Typography';
 // sugerencias, hilo con fuentes y código, y el compositor con "+" (adjuntar y
 // búsqueda web), modelo y enviar.
 import * as Clipboard from 'expo-clipboard';
-import React, { useState } from 'react';
-import { FlatList, Linking, Pressable,   View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { FlatList, Linking,    View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -247,7 +250,7 @@ function Hero({ firstName }) {
 function Starters({ onPick }) {
   const c = useColors();
   return (
-    <FadeUp delay={120} style={{ marginHorizontal: 20, marginBottom: 22, borderRadius: RADIUS, backgroundColor: c.sheet, overflow: 'hidden' }}>
+    <FadeUp delay={120} style={{ marginHorizontal: LINEAS.texto, marginBottom: 22, borderRadius: RADIUS, backgroundColor: c.sheet, overflow: 'hidden' }}>
       {STARTERS.map((s, i) => (
         <View key={s.label}>
           {i > 0 && <View style={{ height: 1, marginLeft: 44, backgroundColor: c.surface3 }} />}
@@ -275,7 +278,7 @@ function Starters({ onPick }) {
 
 function ThreadSkeleton() {
   return (
-    <View style={{ paddingHorizontal: 20, paddingTop: 12, gap: 26 }}>
+    <View style={{ paddingHorizontal: LINEAS.texto, paddingTop: 12, gap: 26 }}>
       <SkeletonLines widths={['52%']} height={36} style={{ alignItems: 'flex-end' }} />
       <SkeletonLines widths={['90%', '96%', '74%']} height={13} />
       <SkeletonLines widths={['38%']} height={36} style={{ alignItems: 'flex-end' }} />
@@ -478,7 +481,7 @@ function MessageList({ onCopy, onUserLongPress }) {
       inverted
       data={items}
       keyExtractor={(_, i) => String(chat.messages.length - i)}
-      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 }}
+      contentContainerStyle={{ paddingHorizontal: LINEAS.texto, paddingTop: 16, paddingBottom: 12 }}
       keyboardShouldPersistTaps="handled"
       renderItem={({ item, index }) => {
         const isLast = index === 0;
@@ -558,6 +561,7 @@ function MessageList({ onCopy, onUserLongPress }) {
 }
 
 function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickModel, onAttach, attachments }) {
+  const modelAnchor = useRef(null);
   const c = useColors();
   const chat = useChat();
   const ui = useUi();
@@ -619,7 +623,8 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
           </Pressable>
 
           <Pressable
-            onPress={onPickModel}
+            ref={modelAnchor}
+            onPress={() => modelAnchor.current?.measureInWindow((x, y, width, height) => onPickModel({ x, y, width, height }))}
             accessibilityLabel={`Modelo: ${chat.model || 'sin modelos'}`}
             style={({ pressed }) => ({
               flexShrink: 1,
@@ -632,9 +637,9 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
               backgroundColor: pressed ? c.pressed : 'transparent',
             })}
           >
-            <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink70 }}>
+            <ChangingText numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink70 }}>
               {chat.model || 'Sin modelos'}
-            </Text>
+            </ChangingText>
             <Icon name="chevron-down" size={14} color={c.ink70} strokeWidth={1.8} />
           </Pressable>
 

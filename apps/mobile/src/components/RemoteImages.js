@@ -1,3 +1,4 @@
+import { Pressable } from './MotionPressable';
 import { TEXT } from '../theme';
 import { Text } from './Typography';
 // RemoteImages.js — las imágenes del chat remoto: las que manda la persona y
@@ -7,7 +8,7 @@ import { Text } from './Typography';
 // pantalla completa (pellizcar acerca, deslizar hacia abajo cierra) con
 // Guardar y Compartir.
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, Modal, PanResponder, Pressable,  View, useWindowDimensions } from 'react-native';
+import { Animated, Image, Modal, PanResponder,   View, useWindowDimensions } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';

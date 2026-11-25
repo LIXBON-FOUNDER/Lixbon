@@ -1,3 +1,4 @@
+import { Pressable } from './MotionPressable';
 import { TEXT } from '../theme';
 import { Text, TextInput } from './Typography';
 // QuestionBatch.js — la tanda de preguntas del agente (ask_user con varias
@@ -7,7 +8,7 @@ import { Text, TextInput } from './Typography';
 // se responde de una vez con batchValue; lo que quede vacío lo decide el
 // agente.
 import React, { forwardRef, useImperativeHandle, useState } from 'react';
-import { Pressable, ScrollView,   View } from 'react-native';
+import {  ScrollView,   View } from 'react-native';
 
 import Icon from './Icon';
 import { FadeUp, agentStyle, useColors } from './ui';

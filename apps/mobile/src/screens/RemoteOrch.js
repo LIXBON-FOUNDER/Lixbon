@@ -1,3 +1,5 @@
+import { Pressable } from '../components/MotionPressable';
+import { LINEAS } from '../theme';
 import { TEXT } from '../theme';
 import { Text } from '../components/Typography';
 // RemoteOrch.js — el orquestador de agentes del IDE, visto desde el control
@@ -7,7 +9,7 @@ import { Text } from '../components/Typography';
 // pide: el run en curso arriba con sus fases y agentes, los anteriores debajo,
 // el detalle de cada agente como línea de tiempo y los ajustes en secciones.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Linking, Pressable, ScrollView,  View } from 'react-native';
+import { Linking,  ScrollView,  View } from 'react-native';
 
 import Icon from '../components/Icon';
 import { LiveDot } from '../components/RemoteSessionList';
@@ -585,7 +587,7 @@ export default function RemoteOrch({ state, sendCommand, core }) {
   }
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: LINEAS.caja, paddingTop: 4, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
       <CoreStatus core={core} />
       {body}
     </ScrollView>

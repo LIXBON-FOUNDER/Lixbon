@@ -1,3 +1,4 @@
+import { LINEAS } from '../theme';
 // ObserveScreen.js — sección Supervisar con datos reales del Core.
 //
 // Sustituye al prototipo de datos de ejemplo (LXO-227, SupervisionScreen.js), que se queda en el repo sin
@@ -45,7 +46,7 @@ export default function ObserveScreen({ obs, onMenu, routes = ROUTES }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { sheet } = useDialogs();
-  const gutter = width < 360 ? 12 : 16;
+  const gutter = LINEAS.caja;
   const { route, session } = obs;
   const atHome = route.name === 'home';
 

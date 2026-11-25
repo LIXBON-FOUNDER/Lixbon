@@ -1,10 +1,12 @@
+import { Pressable } from '../components/MotionPressable';
+import { LINEAS } from '../theme';
 import { TEXT } from '../theme';
 import { Text } from '../components/Typography';
 // UsageScreen.js — plan vigente con el atajo para mejorarlo, las dos cuotas
 // (sesión y semana) en porcentaje grande con cuándo se reinician, y el panal
 // de tokens por servicio de los últimos 7 o 30 días.
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Linking, Pressable, RefreshControl, ScrollView,  View } from 'react-native';
+import { Animated, Linking,  RefreshControl, ScrollView,  View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Polygon, Text as SvgText } from 'react-native-svg';
 
@@ -62,7 +64,7 @@ export default function UsageScreen({ onBack }) {
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
       <StackHeader title="Uso y límites" onBack={onBack} />
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 28, gap: 12 }}
+        contentContainerStyle={{ paddingHorizontal: LINEAS.caja, paddingTop: 12, paddingBottom: 28, gap: 12 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

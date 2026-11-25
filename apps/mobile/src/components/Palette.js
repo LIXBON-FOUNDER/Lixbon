@@ -1,3 +1,4 @@
+import { Pressable } from './MotionPressable';
 import { TEXT } from '../theme';
 import { Text, TextInput } from './Typography';
 // Palette.js — búsqueda global a pantalla completa: un campo para buscar o
@@ -5,7 +6,7 @@ import { Text, TextInput } from './Typography';
 // texto, lo de siempre a mano: recientes, acciones con el tema en línea y
 // accesos. Con texto, conversaciones y comandos por coincidencia difusa.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, FlatList, Modal, Pressable,   View } from 'react-native';
+import { Animated, FlatList, Modal,    View } from 'react-native';
 import { KeyboardController } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 

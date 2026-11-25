@@ -1,3 +1,4 @@
+import { Pressable } from '../components/MotionPressable';
 import { TEXT } from '../theme';
 import { Text, TextInput } from '../components/Typography';
 // SupervisionScreen.js — prototipo de supervisión remota (LXO-227, datos de
@@ -8,7 +9,7 @@ import { Text, TextInput } from '../components/Typography';
 // Pantallas: inicio (atención, trabajo activo, uso, avisos) → tarea (contexto,
 // agente, intentos) → pregunta / aprobación / revisión; más hosts, avisos y uso.
 import React, { useState } from 'react';
-import { Pressable, ScrollView,   View, useWindowDimensions } from 'react-native';
+import {  ScrollView,   View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from '../components/Icon';

@@ -1,9 +1,10 @@
+import { Pressable } from './MotionPressable';
 import { Text } from './Typography';
 // markdown.js — estilos y reglas de las respuestas en Markdown (chat y control
 // remoto). Los bloques de código llevan cabecera con el lenguaje y copiar.
 import * as Clipboard from 'expo-clipboard';
 import React from 'react';
-import { Pressable, ScrollView,  View } from 'react-native';
+import {  ScrollView,  View } from 'react-native';
 
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';
 import Icon from './Icon';

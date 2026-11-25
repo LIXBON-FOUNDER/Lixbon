@@ -1,10 +1,11 @@
+import { Pressable } from './MotionPressable';
 import { TEXT } from '../theme';
 import { Text } from './Typography';
 // RemoteSessionList.js — filas de las sesiones remotas abiertas: el agente en
 // una ficha de 28px, título, de dónde viene y un punto que late mientras el
 // host está conectado. La usan el menú lateral y la sección Remoto.
 import React from 'react';
-import { Pressable,  View } from 'react-native';
+import {   View } from 'react-native';
 
 import { agentOf, isOnline, timeAgo } from '../remoteSessions';
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';

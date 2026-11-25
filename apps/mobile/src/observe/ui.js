@@ -1,3 +1,4 @@
+import { LINEAS } from '../theme';
 import { StatusIcon } from '@lixbon/icons/status';
 import { TEXT } from '../theme';
 import { Text } from '../components/Typography';
@@ -65,9 +66,9 @@ export function Notice({ tone = 'warn', icon, title, children, action, onAction,
       accessibilityRole={tone === 'error' ? 'alert' : 'summary'}
       accessibilityLiveRegion="polite"
       accessibilityLabel={accessibilityLabel}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: RADIUS, backgroundColor: bg }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: LINEAS.espacioIcono, padding: LINEAS.relleno, borderRadius: RADIUS, backgroundColor: bg }}
     >
-      {icon ? <Icon name={icon} size={17} color={fg} /> : null}
+      {icon ? <Icon name={icon} size={LINEAS.icono} color={fg} /> : null}
       <View style={{ flex: 1, gap: 2 }}>
         {title ? <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: tone === 'muted' ? c.inkBody : fg }}>{title}</Text> : null}
         {children ? <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 19, color: c.inkBody }}>{children}</Text> : null}

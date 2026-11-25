@@ -1,3 +1,7 @@
+import { Pressable } from './MotionPressable';
+import { useReducedMotion } from './motionPreference';
+export { useReducedMotion } from './motionPreference';
+import { LINEAS } from '../theme';
 import { StatusIcon } from '@lixbon/icons/status';
 import { TEXT } from '../theme';
 import { Text } from './Typography';
@@ -10,7 +14,7 @@ import {
   Animated,
   Easing,
   Image,
-  Pressable,
+
   StyleSheet,
 
   View,
@@ -26,7 +30,7 @@ import { FONTS, MOTION, RADIUS, RADIUS_SM, buildTheme } from '../theme';
 import { UI_DEFAULTS, usePrefs } from '../state';
 import Icon from './Icon';
 
-export const EASE = Easing.bezier(0.22, 1, 0.36, 1);
+export const EASE = Easing.bezier(0.23, 1, 0.32, 1);
 export const SPRING = Easing.bezier(0.3, 1.2, 0.5, 1);
 
 // ── Tema activo ──────────────────────────────────────────────────────────────
@@ -51,18 +55,6 @@ export function avatarUri(base, user) {
   const url = user?.avatar_url;
   if (typeof url !== 'string' || !url) return null;
   return /^https?:/.test(url) ? url : `${base}${url}`;
-}
-
-// Sin animaciones si el sistema lo pide o si el usuario las apagó.
-export function useReducedMotion() {
-  const { motion } = useUi();
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled().then(setReduced).catch(() => {});
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduced);
-    return () => sub?.remove();
-  }, []);
-  return reduced || !motion;
 }
 
 const TEXT_SCALE = { sm: 0.93, md: 1, lg: 1.1 };
@@ -268,7 +260,7 @@ export function PillButton({ label, onPress, disabled = false, danger = false, o
           gap: 8,
           borderRadius: sm ? RADIUS_SM : RADIUS,
           paddingHorizontal: sm ? 12 : 18,
-          minHeight: lg ? 50 : sm ? 36 : 44,
+          minHeight: lg ? 50 : LINEAS.tacto,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: bg,
@@ -365,9 +357,9 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
       placed.current = true;
       return;
     }
+    w.setValue(l.width);
     Animated.parallel([
-      Animated.timing(x, { toValue: l.x, duration: MOTION.fade, easing: EASE, useNativeDriver: false }),
-      Animated.timing(w, { toValue: l.width, duration: MOTION.fade, easing: EASE, useNativeDriver: false }),
+      Animated.timing(x, { toValue: l.x, duration: MOTION.segment, easing: Easing.bezier(0.77, 0, 0.175, 1), useNativeDriver: true }),
     ]).start();
   }, [value, layouts, x, w, reduced]);
 
@@ -389,7 +381,8 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
           style={{
             position: 'absolute',
             top: 3,
-            left: x,
+            left: 0,
+            transform: [{ translateX: x }],
             width: w,
             height: h,
             borderRadius: lg ? RADIUS_SM : 5,
@@ -408,6 +401,7 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
               const { x: lx, width } = e.nativeEvent.layout;
               setLayouts((cur) => (cur[o.value]?.x === lx && cur[o.value]?.width === width ? cur : { ...cur, [o.value]: { x: lx, width } }));
             }}
+            hitSlop={{ top: 7, bottom: 7 }}
             accessibilityRole="radio"
             accessibilityLabel={o.a11y || (typeof o.label === 'string' ? o.label : undefined)}
             accessibilityState={{ selected: active }}
@@ -494,7 +488,7 @@ export function Toggle({ value, onChange, disabled = false, label }) {
 
 export function Card({ children, style }) {
   const c = useColors();
-  return <View style={[{ backgroundColor: c.sheet, borderRadius: RADIUS, padding: 16 }, style]}>{children}</View>;
+  return <View style={[{ backgroundColor: c.sheet, borderRadius: RADIUS, padding: LINEAS.relleno }, style]}>{children}</View>;
 }
 
 /// Encabezado de grupo (Fijadas, Hoy, Plan…): sin versalitas, apagado.
@@ -509,7 +503,7 @@ export function Section({ title, children, delay = 0, style }) {
   const c = useColors();
   return (
     <FadeUp delay={delay} style={[{ gap: 8 }, style]}>
-      {!!title && <Eyebrow style={{ paddingHorizontal: 4 }}>{title}</Eyebrow>}
+      {!!title && <Eyebrow style={{ paddingHorizontal: LINEAS.relleno }}>{title}</Eyebrow>}
       <View style={{ borderRadius: RADIUS, backgroundColor: c.sheet, paddingVertical: 4, overflow: 'hidden' }}>{children}</View>
     </FadeUp>
   );
@@ -526,11 +520,11 @@ export function Row({ title, detail, value, right, onPress, chevron = !!onPress,
       accessibilityRole={onPress ? 'button' : undefined}
       style={({ pressed }) => ({
         minHeight: detail ? 64 : 52,
-        paddingHorizontal: 14,
+        paddingHorizontal: LINEAS.relleno,
         paddingVertical: detail ? 10 : 0,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: LINEAS.espacioIcono,
         backgroundColor: pressed && onPress ? c.pressed : 'transparent',
       })}
     >
@@ -557,8 +551,8 @@ export function Row({ title, detail, value, right, onPress, chevron = !!onPress,
 export function RowIcon({ name, danger = false, children }) {
   const c = useColors();
   return (
-    <View style={{ width: 28, height: 28, borderRadius: RADIUS_SM, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-      {children || <Icon name={name} size={15} color={danger ? c.danger : c.inkBody} />}
+    <View style={{ width: LINEAS.icono, height: LINEAS.icono, borderRadius: RADIUS_SM, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+      {children || <Icon name={name} size={LINEAS.icono} color={danger ? c.danger : c.inkBody} />}
     </View>
   );
 }
@@ -578,7 +572,7 @@ export function Meter({ value, width, color }) {
 export function StackHeader({ title, onBack, right = null }) {
   const c = useColors();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: 2, height: 50 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: LINEAS.iconoCentro - LINEAS.tacto / 2, paddingTop: 2, height: 50 }}>
       <IconButton onPress={onBack} label="Volver">
         <Icon name="arrow-left" size={20} color={c.inkBody} />
       </IconButton>
@@ -606,7 +600,7 @@ export function ChatHeader({ title, onLeading, leadingIcon = 'menu', onTitle, tr
   const c = useColors();
   const insets = useSafeAreaInsets();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: insets.top + 2, height: insets.top + 50 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: LINEAS.iconoCentro - LINEAS.tacto / 2, paddingTop: insets.top + 2, height: insets.top + 50 }}>
       <IconButton onPress={onLeading} label={leadingIcon === 'menu' ? 'Abrir menú' : 'Volver'}>
         <Icon name={leadingIcon} size={leadingIcon === 'menu' ? 22 : 20} color={c.inkBody} />
       </IconButton>

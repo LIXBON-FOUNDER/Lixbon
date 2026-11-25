@@ -1,3 +1,6 @@
+import { MOTION } from '../theme';
+import { Pressable } from '../components/MotionPressable';
+import { LINEAS } from '../theme';
 import { FileIcon } from '@lixbon/icons/file-icons';
 import { TEXT } from '../theme';
 import { Text, TextInput } from '../components/Typography';
@@ -9,7 +12,7 @@ import { Text, TextInput } from '../components/Typography';
 // preguntas y el compact van encima del compositor. Todo se ejecuta en la
 // máquina host; esto es un mando.
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, AppState, BackHandler, Easing, FlatList, Keyboard, Linking, Pressable, RefreshControl, ScrollView,   View } from 'react-native';
+import { ActivityIndicator, Animated, AppState, BackHandler, Easing, FlatList, Keyboard, Linking,  RefreshControl, ScrollView,   View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
@@ -585,7 +588,7 @@ function RemoteSessionView({ session, onBack, onUsage }) {
               inverted
               data={blocks}
               keyExtractor={(b) => b.key}
-              contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 }}
+              contentContainerStyle={{ paddingHorizontal: LINEAS.texto, paddingTop: 16, paddingBottom: 12 }}
               keyboardShouldPersistTaps="handled"
               onScroll={onListScroll}
               scrollEventThrottle={100}
@@ -774,7 +777,7 @@ function SessionEmpty({ state, agent }) {
   const c = useColors();
   const a = agentStyle(agent, c);
   if (!state.hostConnected && !state.ended) {
-    return <SkeletonLines widths={['84%', '62%', '74%']} height={13} style={{ paddingHorizontal: 20, paddingTop: 16 }} />;
+    return <SkeletonLines widths={['84%', '62%', '74%']} height={13} style={{ paddingHorizontal: LINEAS.texto, paddingTop: 16 }} />;
   }
   return (
     <FadeUp style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36, gap: 14 }}>
@@ -1256,7 +1259,7 @@ function TimelineSheet({ turn, focus, live, agent, open, toggle, onClose }) {
             <Icon name="x" size={18} color={c.inkMuted} strokeWidth={1.8} />
           </Pressable>
         </View>
-        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: LINEAS.caja, paddingBottom: 12 }}>
           {work.map((it, i) => {
             const onLayout =
               it.key === focus
@@ -1506,7 +1509,7 @@ function ChangesView({ changes, open, toggle }) {
     <FlatList
       data={changes}
       keyExtractor={(x) => x.turn.key}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16 }}
+      contentContainerStyle={{ paddingHorizontal: LINEAS.caja, paddingTop: 4, paddingBottom: 16 }}
       ListHeaderComponent={
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4, paddingBottom: 4 }}>
           <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
@@ -1862,7 +1865,7 @@ function Spinner({ size = 15 }) {
   const spin = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (reduced) return undefined;
-    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 1100, easing: Easing.linear, useNativeDriver: true }));
+    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: MOTION.spinner, easing: Easing.linear, useNativeDriver: true }));
     loop.start();
     return () => loop.stop();
   }, [spin, reduced]);
@@ -1936,7 +1939,7 @@ function ContextRing({ context, compacting, onPress }) {
       spin.setValue(0);
       return undefined;
     }
-    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 1100, easing: Easing.linear, useNativeDriver: true }));
+    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: MOTION.spinner, easing: Easing.linear, useNativeDriver: true }));
     loop.start();
     return () => loop.stop();
   }, [compacting, spin, reduced]);

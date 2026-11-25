@@ -1,3 +1,5 @@
+import { Pressable } from './src/components/MotionPressable';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 // App.js — raíz de la app móvil: la sección activa (Chat, Remoto o, con el
 // prototipo activado en Ajustes, Supervisar) a pantalla
 // completa con su propia cabecera, el menú lateral (que cambia de sección y
@@ -8,7 +10,7 @@ import { useFonts } from 'expo-font';
 import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, BackHandler, Pressable, View, useWindowDimensions } from 'react-native';
+import { Animated, BackHandler,  View, useWindowDimensions } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 
@@ -46,7 +48,7 @@ export default function App() {
   return (
     // La app es edge-to-edge (app.config.js): sin esto keyboard-controller
     // descuenta la barra de navegación y la caja quedaba medio tapada.
-    <KeyboardProvider statusBarTranslucent navigationBarTranslucent>
+    <GestureHandlerRootView style={{ flex: 1 }}><KeyboardProvider statusBarTranslucent navigationBarTranslucent>
       <SafeAreaProvider>
         <AppState>
           <ThemeProvider>
@@ -56,7 +58,7 @@ export default function App() {
           </ThemeProvider>
         </AppState>
       </SafeAreaProvider>
-    </KeyboardProvider>
+    </KeyboardProvider></GestureHandlerRootView>
   );
 }
 
@@ -218,8 +220,9 @@ function HomeShell() {
 
   const openRemote = useCallback(() => setSection('remote'), []);
 
-  const pickModel = useCallback(async () => {
+  const pickModel = useCallback(async (anchor) => {
     const value = await sheet({
+      anchor: anchor?.width ? anchor : null,
       title: 'Modelo',
       emptyLabel: 'No hay modelos disponibles.',
       items: chat.models.map((m) => ({ label: m, value: m, selected: m === chat.model })),

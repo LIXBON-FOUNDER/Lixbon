@@ -1,3 +1,4 @@
+import { Pressable } from '../../components/MotionPressable';
 import { TEXT } from '../../theme';
 import { Text } from '../../components/Typography';
 import OpenOnDesktop from './OpenOnDesktop';
@@ -7,7 +8,7 @@ import OpenOnDesktop from './OpenOnDesktop';
 // icono por categoría, severidad, destino y edad. Las Attention de una Task abren su detalle (LXO-110); abrir
 // no cambia su estado. Las preguntas de un Attempt pueden abrir su pantalla de respuesta (LXO-164).
 import React, { useState } from 'react';
-import { Pressable,  View } from 'react-native';
+import {   View } from 'react-native';
 
 import Icon from '../../components/Icon';
 import { useDialogs } from '../../components/dialogs';

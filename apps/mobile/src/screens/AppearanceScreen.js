@@ -1,10 +1,12 @@
+import { Pressable } from '../components/MotionPressable';
+import { LINEAS } from '../theme';
 import { TEXT } from '../theme';
 import { Text } from '../components/Typography';
 // AppearanceScreen.js — Personalizar: una muestra del chat que cambia en vivo,
 // el color de acento, la lectura (tamaño y densidad) y los detalles de la
 // interfaz. Todo se aplica al instante; "Restablecer" vuelve a lo de fábrica.
 import React from 'react';
-import { Pressable, ScrollView,  View } from 'react-native';
+import {  ScrollView,  View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Icon from '../components/Icon';
@@ -64,7 +66,7 @@ export default function AppearanceScreen({ onBack }) {
           </Pressable>
         }
       />
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 28, gap: 24 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: LINEAS.caja, paddingTop: 12, paddingBottom: 28, gap: 24 }}>
         <Preview />
 
         <FadeUp delay={40} style={{ gap: 10 }}>

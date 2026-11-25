@@ -1,3 +1,4 @@
+import { Pressable } from '../components/MotionPressable';
 import { TEXT } from '../theme';
 import { Text, TextInput } from '../components/Typography';
 // AuthScreen.js — acceso: iniciar sesión y crear cuenta como dos vistas, cada
@@ -5,7 +6,7 @@ import { Text, TextInput } from '../components/Typography';
 // Apple primero, y el correo debajo. Recuperar la contraseña es una hoja sobre
 // el login, no otra pantalla.
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView,   View } from 'react-native';
+import {  ScrollView,   View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 

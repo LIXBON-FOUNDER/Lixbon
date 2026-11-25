@@ -1,3 +1,4 @@
+import { Pressable } from './MotionPressable';
 import { TEXT } from '../theme';
 import { Text, TextInput } from './Typography';
 // Camera.js — cámara propia para adjuntar al chat (en vez de saltar a la app
@@ -8,7 +9,7 @@ import { Text, TextInput } from './Typography';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, Linking, Modal, Pressable,   View } from 'react-native';
+import { Animated, Image, Linking, Modal,    View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { pickImages } from '../attachments';

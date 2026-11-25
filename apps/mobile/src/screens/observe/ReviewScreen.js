@@ -1,6 +1,7 @@
+import { Pressable } from '../../components/MotionPressable';
 import OpenOnDesktop from './OpenOnDesktop';
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import {  View } from 'react-native';
 import { useDialogs } from '../../components/dialogs';
 import { Eyebrow, PillButton } from '../../components/ui';
 import { Body, Mono, Notice, Title } from '../../observe/ui';

@@ -1,3 +1,4 @@
+import { Pressable } from '../../components/MotionPressable';
 import { TEXT } from '../../theme';
 import { Text } from '../../components/Typography';
 // AttemptsSection.js — los intentos de una Task en su detalle (LXO-126, solo lectura).
@@ -7,7 +8,7 @@ import { Text } from '../../components/Typography';
 // con un filtro Todos / En curso / Terminados. Host y origen salen en cada fila solo si cambian entre intentos.
 // Tocar una fila abre ese intento: nunca se elige «el último» por el usuario.
 import React, { useState } from 'react';
-import { Pressable,  View } from 'react-native';
+import {   View } from 'react-native';
 
 import Icon from '../../components/Icon';
 import { Eyebrow, Segmented, useColors } from '../../components/ui';

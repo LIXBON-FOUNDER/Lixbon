@@ -1,10 +1,11 @@
+import { Pressable } from './MotionPressable';
 import { FileIcon } from '@lixbon/icons/file-icons';
 import { TEXT } from '../theme';
 import { Text } from './Typography';
 // Attachments.js — adjuntos del compositor (chat y control remoto): selector
 // de origen, lectura en segundo plano y las miniaturas que se ven mientras.
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView,  View } from 'react-native';
+import { ActivityIndicator, Image,  ScrollView,  View } from 'react-native';
 
 import { pickDocuments, pickImages, readAttachment } from '../attachments';
 import { useApi } from '../state';

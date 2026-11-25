@@ -1,9 +1,10 @@
+import { Pressable } from './MotionPressable';
 import { TEXT } from '../theme';
 import { Text } from './Typography';
 // StepSlider.js — deslizador por pasos (niveles de razonamiento): se arrastra
 // o se toca la marca.
 import React, { useRef, useState } from 'react';
-import { PanResponder, Pressable,  View } from 'react-native';
+import { PanResponder,   View } from 'react-native';
 
 import { FONTS } from '../theme';
 import { useColors } from './ui';

@@ -1,3 +1,5 @@
+import { Pressable } from '../components/MotionPressable';
+import { LINEAS } from '../theme';
 import { TEXT } from '../theme';
 import { Text, TextInput } from '../components/Typography';
 // SettingsScreen.js — Ajustes en secciones: perfil (abre su hoja), plan,
@@ -5,7 +7,7 @@ import { Text, TextInput } from '../components/Typography';
 // delicadas piden confirmación, y eliminar la cuenta se hace manteniendo pulsado.
 import Constants from 'expo-constants';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Linking, Pressable, ScrollView,   View } from 'react-native';
+import { Animated, Easing, Linking,  ScrollView,   View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ApiException } from '../api';
@@ -119,7 +121,7 @@ export default function SettingsScreen({ onBack, onNavigate }) {
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
       <StackHeader title="Ajustes" onBack={onBack} />
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 32, gap: 22 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: LINEAS.caja, paddingTop: 12, paddingBottom: 32, gap: 22 }}>
         <FadeUp>
           <Pressable
             onPress={editProfile}

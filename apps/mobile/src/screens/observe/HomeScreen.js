@@ -1,10 +1,11 @@
+import { Pressable } from '../../components/MotionPressable';
 import { TEXT } from '../../theme';
 import { Text } from '../../components/Typography';
 // HomeScreen.js — Home de Supervisar (LXO-108): resumen operativo del IDE elegido. Projects con su estado y
 // contadores separados (activas, fallidas, Attention), el trabajo activo global, la Attention por categoría y la
 // salud del Core. Solo resume (sale de la snapshot); el ADE completo está en Desktop.
 import React from 'react';
-import { Pressable,  View } from 'react-native';
+import {   View } from 'react-native';
 
 import Icon from '../../components/Icon';
 import { Eyebrow, useColors } from '../../components/ui';
