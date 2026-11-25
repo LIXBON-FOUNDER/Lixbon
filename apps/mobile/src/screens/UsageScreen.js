@@ -1,8 +1,10 @@
+import { TEXT } from '../theme';
+import { Text } from '../components/Typography';
 // UsageScreen.js — plan vigente con el atajo para mejorarlo, las dos cuotas
 // (sesión y semana) en porcentaje grande con cuándo se reinician, y el panal
 // de tokens por servicio de los últimos 7 o 30 días.
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Linking, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Animated, Linking, Pressable, RefreshControl, ScrollView,  View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Polygon, Text as SvgText } from 'react-native-svg';
 
@@ -83,21 +85,21 @@ export default function UsageScreen({ onBack }) {
         )}
         {!!error && (
           <View style={{ padding: 14, borderRadius: RADIUS, backgroundColor: c.dangerSoft }}>
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.danger }}>{error}</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.danger }}>{error}</Text>
           </View>
         )}
 
         {plan && (
           <FadeUp style={[card, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
             <View style={{ flex: 1, gap: 2 }}>
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 16, color: c.ink }}>Plan {String(plan.name || plan.id || '')}</Text>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>El mismo cupo en web, IDE y móvil</Text>
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}>Plan {String(plan.name || plan.id || '')}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>El mismo cupo en web, IDE y móvil</Text>
             </View>
             <Pressable
               onPress={() => Linking.openURL(`${api.base}/plans`)}
               style={({ pressed }) => ({ height: 36, paddingHorizontal: 12, borderRadius: RADIUS_SM, justifyContent: 'center', backgroundColor: pressed ? c.surface5 : c.raised })}
             >
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.onRaised }}>Mejorar</Text>
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.onRaised }}>Mejorar</Text>
             </Pressable>
           </FadeUp>
         )}
@@ -138,7 +140,7 @@ export function Quota({ label, bucket, accent = false, delay = 0 }) {
   return (
     <View style={{ gap: 10 }}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.ink }}>{label}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink }}>{label}</Text>
         <Text style={{ fontFamily: FONTS.uiMedium, fontSize: unlimited ? 15 : 26, letterSpacing: -0.5, color: ratio >= 1 ? c.danger : c.ink }}>
           {unlimited ? 'Ilimitado' : `${Math.round(bucket.percent)}%`}
         </Text>
@@ -148,7 +150,7 @@ export function Quota({ label, bucket, accent = false, delay = 0 }) {
           <GrowBar ratio={ratio} color={color} delay={delay} style={{ height: 6, borderRadius: 3 }} />
         </View>
       )}
-      {!!fmtReset(bucket.reset_at) && <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{fmtReset(bucket.reset_at)}</Text>}
+      {!!fmtReset(bucket.reset_at) && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{fmtReset(bucket.reset_at)}</Text>}
     </View>
   );
 }
@@ -176,8 +178,8 @@ function ServiceComb({ rows }) {
     <>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
         <View style={{ flex: 1, gap: 2 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.ink }}>Tokens por servicio</Text>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{`${fmtTokens(total)} en ${days} días`}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink }}>Tokens por servicio</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{`${fmtTokens(total)} en ${days} días`}</Text>
         </View>
         <Segmented
           size="sm"
@@ -195,7 +197,7 @@ function ServiceComb({ rows }) {
 
       <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ alignItems: 'center', paddingVertical: 4 }}>
         {cells.length === 0 ? (
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted, paddingVertical: 24 }}>Sin uso en estos días</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted, paddingVertical: 24 }}>Sin uso en estos días</Text>
         ) : (
           width > 0 && (
             <Svg
@@ -240,7 +242,7 @@ function ServiceComb({ rows }) {
       </View>
 
       {detail && (
-        <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: 13, color: c.ink }}>
+        <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink }}>
           {`${SERVICE_LABEL[detail.service]} · ${parseInt(detail.date.slice(8, 10), 10)} ${MONTHS[parseInt(detail.date.slice(5, 7), 10) - 1]} · ${fmtTokens(detail.tokens)}`}
         </Text>
       )}
@@ -252,14 +254,14 @@ function ServiceComb({ rows }) {
               <Svg width={12} height={14}>
                 <Polygon points="6,0 12,3.5 12,10.5 6,14 0,10.5 0,3.5" fill={colors[x]} />
               </Svg>
-              <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.ink }}>{SERVICE_LABEL[x]}</Text>
+              <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink }}>{SERVICE_LABEL[x]}</Text>
               <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }}>{`${Math.ceil(totals[x] / HEX_TOKENS)} hex`}</Text>
               <Text style={{ width: 64, textAlign: 'right', fontFamily: FONTS.mono, fontSize: 12.5, color: c.ink }}>{fmtTokens(totals[x])}</Text>
             </View>
           ))}
         </View>
       )}
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 12, lineHeight: 17, color: c.inkMuted }}>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 17, color: c.inkMuted }}>
         {`Cada hexágono son 200 mil tokens y lleva el día en que se gastaron. Toca uno para ver el detalle.${totals.other > 0 ? ' «Otros» es lo gastado antes de contar por servicio y con API keys propias.' : ''}${hidden > 0 ? ` Hay ${hidden} hexágonos más que no caben.` : ''}`}
       </Text>
     </>

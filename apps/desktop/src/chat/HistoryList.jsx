@@ -1,3 +1,4 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // HistoryList.jsx — conversaciones del IDE agrupadas por fecha, con la que
 // está en curso arriba: buscar, abrir, renombrar, archivar y borrar.
 // Lo no archivado se borra solo tras 14 días sin actividad: Claude Code en cc_sessions,
@@ -253,9 +254,9 @@ export function HistoryList() {
                       const working = c.streaming && !c.waiting;
                       return (
                         <>
-                          {working && (eng === 'claude' ? <ClaudeMark size={12} className="claudemark--live" /> : <LogoMark size={12} motion="giro" />)}
-                          {c.waiting && <span className="dot dot--accent dot--pulse" title="Espera tu permiso" />}
-                          {c.live && !c.streaming && !c.waiting && <span className="dot dot--good" title="Terminó" />}
+                          <StatusIcon kind={working ? "working" : "agent"} size={16} />
+                          {c.waiting && <StatusIcon kind="permission" size={16} label="Espera tu permiso" />}
+                          {c.live && !c.streaming && !c.waiting && <StatusIcon kind="done" size={16} label="Terminó" />}
                           {!working && (eng !== 'lixbon' || filter === 'all') && <span className="hist__mark" title={engineOf(eng).label}><Mark size={11} /></span>}
                         </>
                       );

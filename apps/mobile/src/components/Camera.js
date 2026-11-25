@@ -1,3 +1,5 @@
+import { TEXT } from '../theme';
+import { Text, TextInput } from './Typography';
 // Camera.js — cámara propia para adjuntar al chat (en vez de saltar a la app
 // de cámara del sistema): modo Foto o Documento con guía de esquinas, flash y
 // cambio de cámara; después una revisión donde se repite, se gira, se añaden
@@ -6,7 +8,7 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, Linking, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { Animated, Image, Linking, Modal, Pressable,   View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { pickImages } from '../attachments';
@@ -85,14 +87,14 @@ function CameraStage({ docMode, onMode, onClose, onCapture }) {
           <Icon name="x" size={20} color="#F2F2F0" />
         </Pressable>
         <View style={{ flex: 1, justifyContent: 'center', gap: 12 }}>
-          <Text style={{ fontFamily: FONTS.serif, fontSize: 30, lineHeight: 35, color: '#F2F2F0' }}>Lixbon necesita la cámara</Text>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 15, lineHeight: 22, color: '#B0B0AD' }}>Para fotografiar documentos y adjuntarlos al chat. Las fotos solo salen del teléfono cuando las envías.</Text>
+          <Text style={{ fontFamily: FONTS.serif, fontSize: TEXT.brand, lineHeight: 35, color: '#F2F2F0' }}>Lixbon necesita la cámara</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.body, lineHeight: 22, color: '#B0B0AD' }}>Para fotografiar documentos y adjuntarlos al chat. Las fotos solo salen del teléfono cuando las envías.</Text>
         </View>
         <Pressable
           onPress={permission.canAskAgain ? requestPermission : () => Linking.openSettings()}
           style={({ pressed }) => ({ height: 50, borderRadius: RADIUS, backgroundColor: '#F2F2F0', alignItems: 'center', justifyContent: 'center', transform: [{ scale: pressed ? 0.98 : 1 }] })}
         >
-          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: '#0E0E0E' }}>{permission.canAskAgain ? 'Permitir la cámara' : 'Abrir los ajustes'}</Text>
+          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.body, color: '#0E0E0E' }}>{permission.canAskAgain ? 'Permitir la cámara' : 'Abrir los ajustes'}</Text>
         </Pressable>
       </View>
     );
@@ -156,14 +158,14 @@ function CameraStage({ docMode, onMode, onClose, onCapture }) {
           </Pressable>
           <Pressable onPress={() => setFlash(FLASH[(FLASH.indexOf(flash) + 1) % FLASH.length])} accessibilityLabel={FLASH_LABEL[flash]} style={glass}>
             <Icon name={flash === 'off' ? 'flash-off' : 'flash'} size={19} color={flash === 'on' ? c.accent : '#F2F2F0'} />
-            {flash === 'auto' && <Text style={{ position: 'absolute', right: 7, bottom: 5, fontFamily: FONTS.uiSemiBold, fontSize: 9, color: '#F2F2F0' }}>A</Text>}
+            {flash === 'auto' && <Text style={{ position: 'absolute', right: 7, bottom: 5, fontFamily: FONTS.uiSemiBold, fontSize: TEXT.meta, color: '#F2F2F0' }}>A</Text>}
           </Pressable>
         </View>
         {docMode && (
           <View style={{ position: 'absolute', bottom: 18, left: 0, right: 0, alignItems: 'center' }}>
             <View style={{ height: 32, paddingHorizontal: 12, borderRadius: RADIUS_SM, backgroundColor: 'rgba(0,0,0,0.55)', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent }} />
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: '#F2F2F0' }}>Encuadra el documento en las esquinas</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: '#F2F2F0' }}>Encuadra el documento en las esquinas</Text>
             </View>
           </View>
         )}
@@ -176,7 +178,7 @@ function CameraStage({ docMode, onMode, onClose, onCapture }) {
             [true, 'Documento'],
           ].map(([value, label]) => (
             <Pressable key={label} onPress={() => onMode(value)} accessibilityRole="radio" accessibilityState={{ selected: docMode === value }} style={{ height: 32, justifyContent: 'center' }}>
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: docMode === value ? c.accent : '#8A8A86' }}>{label}</Text>
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: docMode === value ? c.accent : '#8A8A86' }}>{label}</Text>
             </Pressable>
           ))}
         </View>
@@ -253,7 +255,7 @@ function ReviewStage({ pages, docMode, onRetake, onAddPage, onRotate, onSend }) 
       <View style={{ paddingTop: insets.top + 10, paddingHorizontal: 10, height: insets.top + 64, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <Pressable onPress={onRetake} style={({ pressed }) => ({ height: 44, paddingHorizontal: 12, borderRadius: RADIUS, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: pressed ? 'rgba(255,255,255,0.06)' : 'transparent' })}>
           <Icon name="refresh" size={17} color="#D6D6D3" />
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: '#D6D6D3' }}>Repetir</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: '#D6D6D3' }}>Repetir</Text>
         </Pressable>
         <Pressable onPress={rotate} accessibilityLabel="Girar" style={({ pressed }) => ({ width: 44, height: 44, borderRadius: RADIUS, alignItems: 'center', justifyContent: 'center', opacity: rotating ? 0.5 : 1, backgroundColor: pressed ? 'rgba(255,255,255,0.06)' : 'transparent' })}>
           <Icon name="rotate" size={19} color="#D6D6D3" />
@@ -272,7 +274,7 @@ function ReviewStage({ pages, docMode, onRetake, onAddPage, onRotate, onSend }) 
         </Animated.View>
       </View>
 
-      <Text style={{ marginBottom: 14, textAlign: 'center', fontFamily: FONTS.ui, fontSize: 13, color: '#8A8A86' }}>
+      <Text style={{ marginBottom: 14, textAlign: 'center', fontFamily: FONTS.ui, fontSize: TEXT.meta, color: '#8A8A86' }}>
         {page.cropped ? `${count} · recortada a la guía` : count}
       </Text>
 
@@ -287,7 +289,7 @@ function ReviewStage({ pages, docMode, onRetake, onAddPage, onRotate, onSend }) 
           placeholderTextColor="#8A8A86"
           selectionColor={c.accent}
           accessibilityLabel="Indicación"
-          style={{ flex: 1, height: 44, paddingVertical: 0, fontFamily: FONTS.ui, fontSize: 15, color: '#F2F2F0' }}
+          style={{ flex: 1, height: 44, paddingVertical: 0, fontFamily: FONTS.ui, fontSize: TEXT.body, color: '#F2F2F0' }}
         />
         <Pressable
           onPress={() => onSend(text.trim())}

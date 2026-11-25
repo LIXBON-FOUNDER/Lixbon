@@ -1,3 +1,4 @@
+import { TEXT } from '../theme';
 // observe/ConnectionBanner.js — banner de conexión de Supervisar (LXO-111). Siempre arriba: en línea es una
 // línea discreta con la hora de la última sincronización; el resto, un aviso con texto accionable y
 // «Reintentar» cuando sirve. El texto lo decide connectionView (connection.js), aquí solo se pinta.
@@ -12,7 +13,7 @@ const ICON = {
   [KIND.CONNECTING]: 'refresh',
   [KIND.RECONNECTING]: 'refresh',
   [KIND.STALE]: 'clock',
-  [KIND.OFFLINE]: 'cloud-off',
+  [KIND.OFFLINE]: 'wifi-off',
   [KIND.UNAUTHORIZED]: 'key',
   [KIND.VERSION_MISMATCH]: 'warning',
 };
@@ -34,7 +35,7 @@ export default function ConnectionBanner({ view, onRetry, hostLabel }) {
     <View style={{ gap: 6 }}>
       <Notice
         tone={tone}
-        icon={ICON[view.kind]}
+        icon={view.kind === KIND.OFFLINE && ['host_offline', 'timeout'].includes(view.code) ? 'monitor-off' : ICON[view.kind]}
         title={view.title}
         action={view.retry ? 'Reintentar' : null}
         onAction={onRetry}
@@ -44,7 +45,7 @@ export default function ConnectionBanner({ view, onRetry, hostLabel }) {
       </Notice>
       {view.code && (view.kind === KIND.OFFLINE || view.kind === KIND.VERSION_MISMATCH) ? (
         // Diagnóstico mínimo: el código estable, sin mensajes ni rutas.
-        <Mono style={{ paddingHorizontal: 4, fontSize: 11.5, opacity: 0.7 }} accessibilityLabel={`Código ${view.code}`}>
+        <Mono style={{ paddingHorizontal: 4, fontSize: TEXT.meta, opacity: 0.7 }} accessibilityLabel={`Código ${view.code}`}>
           {`código: ${view.code}`}
         </Mono>
       ) : null}

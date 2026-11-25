@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // ChangesPanel.jsx — lo que hizo el agente en esta conversación: archivos
 // cambiados (diff real contra el contenido previo, aceptar o revertir), el
 // contexto que leyó y los comandos que ejecutó.
@@ -120,7 +121,7 @@ function ChangesTab() {
             onClick={() => setSelected(c.path)}
           >
             {!c.pending && <IconCheck size={12} />}
-            <span className="mono changes__path">{c.path}</span>
+            <FileIcon nombre={c.path} size={16} /><span className="mono changes__path">{c.path}</span>
             {c.kind === 'create' && <span className="tag tag--good">nuevo</span>}
             {c.kind === 'delete' && <span className="tag tag--danger">borrado</span>}
             {c.pending && <span className="mono diffstat"><em className="is-add">+{c.added}</em> <em className="is-del">−{c.removed}</em></span>}

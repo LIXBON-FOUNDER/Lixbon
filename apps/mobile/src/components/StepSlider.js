@@ -1,7 +1,9 @@
+import { TEXT } from '../theme';
+import { Text } from './Typography';
 // StepSlider.js — deslizador por pasos (niveles de razonamiento): se arrastra
 // o se toca la marca.
 import React, { useRef, useState } from 'react';
-import { PanResponder, Pressable, Text, View } from 'react-native';
+import { PanResponder, Pressable,  View } from 'react-native';
 
 import { FONTS } from '../theme';
 import { useColors } from './ui';
@@ -65,7 +67,7 @@ export default function StepSlider({ steps, value, onChange, labelOf }) {
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
         {steps.map((st) => (
           <Pressable key={st} onPress={() => onChange(st)} hitSlop={8}>
-            <Text style={{ fontFamily: st === steps[index] ? FONTS.uiMedium : FONTS.ui, fontSize: 12.5, color: st === steps[index] ? c.ink : c.inkMuted }}>
+            <Text style={{ fontFamily: st === steps[index] ? FONTS.uiMedium : FONTS.ui, fontSize: TEXT.meta, color: st === steps[index] ? c.ink : c.inkMuted }}>
               {labelOf(st)}
             </Text>
           </Pressable>

@@ -8,3 +8,5 @@ build/
 dist/
 *.log
 google-services.json
+
+.dev-export/

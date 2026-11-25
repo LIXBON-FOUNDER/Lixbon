@@ -1,3 +1,5 @@
+import { TEXT } from '../theme';
+import { Text } from './Typography';
 // Sidebar.js — menú lateral: marca, botón de nueva conversación, selector
 // Chat · Remoto y debajo lo de cada uno: buscar y el historial por fechas,
 // plegable y por páginas (mantener pulsado para fijar, renombrar, compartir o
@@ -5,7 +7,7 @@
 // el resumen de Supervisar. Abajo, la tarjeta de
 // cuenta (foto, nombre y uso de la sesión), que entera lleva a Ajustes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, ScrollView, Text, View } from 'react-native';
+import { FlatList, Pressable, ScrollView,  View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiException } from '../api';
@@ -215,7 +217,7 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
         })}
       >
         <Icon name="plus" size={18} color={c.ink} />
-        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>Nueva conversación</Text>
+        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>Nueva conversación</Text>
       </Pressable>
 
       <View style={{ marginTop: 10 }}>
@@ -260,7 +262,7 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
             })}
           >
             <Icon name="search" size={17} color={c.inkMuted} />
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkMuted }}>Buscar</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>Buscar</Text>
           </Pressable>
     
           <Pressable
@@ -269,7 +271,7 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
             accessibilityState={{ expanded: historyOpen }}
             style={{ marginTop: 14, height: 32, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
           >
-            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.inkMuted }}>Historial</Text>
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.inkMuted }}>Historial</Text>
             <Icon name={historyOpen ? 'chevron-up' : 'chevron-down'} size={15} color={c.inkMuted} />
           </Pressable>
 
@@ -277,7 +279,7 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
             {loading && items.length === 0 ? (
               <SkeletonLines widths={['70%', '52%', '62%', '44%', '58%']} style={{ paddingHorizontal: 12, paddingTop: 6 }} />
             ) : visible.length === 0 ? (
-              <Text style={{ paddingHorizontal: 12, fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>Aún no tienes conversaciones</Text>
+              <Text style={{ paddingHorizontal: 12, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>Aún no tienes conversaciones</Text>
             ) : (
               <FlatList
                 data={rows}
@@ -308,7 +310,7 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
                         })}
                       >
                         {row.pinned && <Icon name="pin" size={13} color={c.inkMuted} strokeWidth={1.8} />}
-                        <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14.5, color: active ? c.ink : c.inkBody }}>
+                        <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: active ? c.ink : c.inkBody }}>
                           {item.title || 'Sin título'}
                         </Text>
                       </Pressable>
@@ -336,7 +338,7 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
         {/* Toda la tarjeta lleva a Ajustes: el engranaje solo lo indica. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Avatar name={displayName} size={36} uri={avatarUri(api.base, user)} />
-          <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>
+          <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>
             {displayName}
           </Text>
           <View pointerEvents="none" importantForAccessibility="no-hide-descendants">
@@ -369,7 +371,7 @@ function SupervisionTab({ sup, onOpen }) {
       onPress={() => onOpen(route)}
       style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, borderRadius: RADIUS, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: pressed ? c.pressed : 'transparent' })}
     >
-      <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkBody }}>{label}</Text>
+      <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>{label}</Text>
       <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }}>{value}</Text>
     </Pressable>
   );
@@ -381,7 +383,7 @@ function SupervisionTab({ sup, onOpen }) {
       {row('Proyectos', count(snap?.projects.total ?? 0), null)}
       <Eyebrow style={{ paddingHorizontal: 12, paddingTop: 18, paddingBottom: 4 }}>IDE</Eyebrow>
       {sup.candidates.length === 0 ? (
-        <Text style={{ paddingHorizontal: 12, fontFamily: FONTS.ui, fontSize: 13, lineHeight: 19, color: c.inkMuted }}>
+        <Text style={{ paddingHorizontal: 12, fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 19, color: c.inkMuted }}>
           Abre Lixbon en el escritorio y activa Remoto para supervisarlo.
         </Text>
       ) : (
@@ -398,7 +400,7 @@ function SupervisionTab({ sup, onOpen }) {
             style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, borderRadius: RADIUS, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: pressed ? c.pressed : 'transparent' })}
           >
             <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: sessionOnline(s) ? c.good : c.inkFaint }} />
-            <Text numberOfLines={1} style={{ flex: 1, fontFamily: s.id === sup.session?.id ? FONTS.uiMedium : FONTS.ui, fontSize: 14.5, color: c.inkBody }}>{hostName(s)}</Text>
+            <Text numberOfLines={1} style={{ flex: 1, fontFamily: s.id === sup.session?.id ? FONTS.uiMedium : FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>{hostName(s)}</Text>
           </Pressable>
         ))
       )}
@@ -414,8 +416,8 @@ function RemoteTab({ remote, activeId, onOpen }) {
   if (remote.sessions.length === 0) {
     return (
       <View style={{ flex: 1, paddingHorizontal: 12, paddingTop: 24, gap: 6 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkBody }}>Sin sesiones remotas</Text>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 19, color: c.inkMuted }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>Sin sesiones remotas</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 19, color: c.inkMuted }}>
           Escribe /remote en el IDE o en el CLI y la sesión aparece aquí al instante.
         </Text>
       </View>

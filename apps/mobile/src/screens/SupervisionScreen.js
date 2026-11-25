@@ -1,3 +1,5 @@
+import { TEXT } from '../theme';
+import { Text, TextInput } from '../components/Typography';
 // SupervisionScreen.js — prototipo de supervisión remota (LXO-227, datos de
 // ejemplo): desde el teléfono se ve qué pide atención, qué está en marcha y en
 // qué host, y se responde, aprueba o revisa lo que cabe en una pantalla. Lo
@@ -6,7 +8,7 @@
 // Pantallas: inicio (atención, trabajo activo, uso, avisos) → tarea (contexto,
 // agente, intentos) → pregunta / aprobación / revisión; más hosts, avisos y uso.
 import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView,   View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from '../components/Icon';
@@ -16,10 +18,10 @@ import { ago, attention, connectionState, decide, desktopHandoff, duration, host
 import { FONTS, RADIUS } from '../theme';
 
 const KIND = {
-  question: { label: 'Pregunta', icon: 'message' },
-  approval: { label: 'Aprobación', icon: 'key' },
-  review: { label: 'Revisión', icon: 'eye' },
-  failed: { label: 'Intento fallido', icon: 'warning' },
+  question: { label: 'Pregunta', icon: 'question' },
+  approval: { label: 'Aprobación', icon: 'permission' },
+  review: { label: 'Revisión', icon: 'review' },
+  failed: { label: 'Intento fallido', icon: 'failed' },
   done: { label: 'Terminada', icon: 'check' },
 };
 
@@ -162,14 +164,14 @@ function StateText({ state, children }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       <Dot color={stateColor(state, c)} />
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{children || STATE_LABEL[state]}</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{children || STATE_LABEL[state]}</Text>
     </View>
   );
 }
 
 function Body({ children, muted = false, style }) {
   const c = useColors();
-  return <Text style={[{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: muted ? c.inkMuted : c.inkBody }, style]}>{children}</Text>;
+  return <Text style={[{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 21, color: muted ? c.inkMuted : c.inkBody }, style]}>{children}</Text>;
 }
 
 function Mono({ children, style, ...rest }) {
@@ -179,7 +181,7 @@ function Mono({ children, style, ...rest }) {
 
 function Title({ children }) {
   const c = useColors();
-  return <Text style={{ fontFamily: FONTS.serif, fontSize: 24, lineHeight: 29, color: c.ink }}>{children}</Text>;
+  return <Text style={{ fontFamily: FONTS.serif, fontSize: TEXT.empty, lineHeight: 29, color: c.ink }}>{children}</Text>;
 }
 
 function Notice({ tone = 'warn', icon, children, action, onAction }) {
@@ -189,7 +191,7 @@ function Notice({ tone = 'warn', icon, children, action, onAction }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: RADIUS, backgroundColor: bg }}>
       {icon ? <Icon name={icon} size={17} color={fg} /> : null}
-      <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 19, color: tone === 'warn' ? fg : c.inkBody }}>{children}</Text>
+      <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 19, color: tone === 'warn' ? fg : c.inkBody }}>{children}</Text>
       {action ? <PillButton size="sm" outline label={action} onPress={onAction} /> : null}
     </View>
   );
@@ -237,21 +239,21 @@ function ContextBlock({ ctx, task }) {
   const elevated = task.policy.level === 'elevated';
   const line = (label, value, extra) => (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 34 }}>
-      <Text style={{ width: 74, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{label}</Text>
+      <Text style={{ width: 74, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{label}</Text>
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>{value}{extra}</View>
     </View>
   );
   return (
     <View style={{ padding: 14, borderRadius: RADIUS, backgroundColor: c.sheet, gap: 2 }}>
-      {line('Host', <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{host ? host.name : '—'}</Text>, <StateText state={hs}>{hs === 'online' ? 'En línea' : `${STATE_LABEL[hs]} · ${ago(host.lastSeenAt, now)}`}</StateText>)}
+      {line('Host', <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{host ? host.name : '—'}</Text>, <StateText state={hs}>{hs === 'online' ? 'En línea' : `${STATE_LABEL[hs]} · ${ago(host.lastSeenAt, now)}`}</StateText>)}
       {line('Destino', <Mono>{`${project ? project.name : ''} · ${task.target.branch}`}</Mono>)}
       {line('Política', (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Dot color={elevated ? c.warn : c.inkFaint} />
-          <Text style={{ fontFamily: elevated ? FONTS.uiMedium : FONTS.ui, fontSize: 14, color: elevated ? c.warn : c.inkBody }}>{task.policy.label}</Text>
+          <Text style={{ fontFamily: elevated ? FONTS.uiMedium : FONTS.ui, fontSize: TEXT.secondary, color: elevated ? c.warn : c.inkBody }}>{task.policy.label}</Text>
         </View>
       ))}
-      {line('Agente', <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkBody }}>{AGENT[task.agent] || task.agent}</Text>)}
+      {line('Agente', <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>{AGENT[task.agent] || task.agent}</Text>)}
     </View>
   );
 }
@@ -356,10 +358,10 @@ function Home({ ctx }) {
                   style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 11, gap: 4, backgroundColor: pressed ? c.pressed : 'transparent' })}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>{task.title}</Text>
+                    <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}>{task.title}</Text>
                     <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkMuted }}>{duration(attempt.startedAt, now)}</Text>
                   </View>
-                  <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+                  <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
                     {`${AGENT[task.agent]} · ${task.status === 'paused' ? 'En pausa · ' : ''}${last.text}`}
                   </Text>
                   {/* Un host que no responde no convierte la tarea en fallida. */}
@@ -395,12 +397,12 @@ function AttentionRow({ kind, title, detail, meta, elevated, onPress }) {
     <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => ({ flexDirection: 'row', gap: 12, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: pressed ? c.pressed : 'transparent' })}>
       <RowIcon name={KIND[kind].icon} danger={kind === 'failed'} />
       <View style={{ flex: 1, gap: 3 }}>
-        <Text numberOfLines={2} style={{ fontFamily: FONTS.uiMedium, fontSize: 15, lineHeight: 20, color: c.ink }}>{title}</Text>
-        <Text numberOfLines={2} style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.inkMuted }}>{detail}</Text>
+        <Text numberOfLines={2} style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, lineHeight: 20, color: c.ink }}>{title}</Text>
+        <Text numberOfLines={2} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: c.inkMuted }}>{detail}</Text>
         {elevated && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Dot color={c.warn} size={6} />
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.warn }}>Política elevada</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.warn }}>Política elevada</Text>
           </View>
         )}
       </View>
@@ -434,7 +436,7 @@ function TaskView({ ctx, taskId }) {
       <FadeUp style={{ gap: 6 }}>
         <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }}>{project.name}</Text>
         <Title>{task.title}</Title>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>{TASK_STATUS[task.status]}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>{TASK_STATUS[task.status]}</Text>
       </FadeUp>
 
       <ContextBlock ctx={ctx} task={task} />
@@ -446,7 +448,7 @@ function TaskView({ ctx, taskId }) {
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Icon name={KIND[pending.kind].icon} size={16} color={c.ink} />
-            <Text style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.ink }}>{pending.title}</Text>
+            <Text style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: TEXT.body, color: c.ink }}>{pending.title}</Text>
             <Icon name="chevron-right" size={16} color={c.inkMuted} />
           </View>
           <Body muted>{pending.queuedAt ? `En cola: «${pending.queuedLabel}»` : pending.kind === 'question' ? pending.question : pending.kind === 'approval' ? pending.why : pending.review.summary}</Body>
@@ -465,7 +467,7 @@ function TaskView({ ctx, taskId }) {
           {task.events.slice(-3).map((e, i) => (
             <View key={i} style={{ flexDirection: 'row', gap: 10 }}>
               <Text style={{ width: 62, fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 19, color: c.inkFaint }}>{ago(e.at, now).replace('hace ', '')}</Text>
-              <Body style={{ flex: 1, fontSize: 14 }}>{e.text}</Body>
+              <Body style={{ flex: 1, fontSize: TEXT.secondary }}>{e.text}</Body>
             </View>
           ))}
         </View>
@@ -482,7 +484,7 @@ function TaskView({ ctx, taskId }) {
           </View>
         )}
         {(task.status === 'running' || task.status === 'paused') && !live && (
-          <Body muted style={{ paddingHorizontal: 14, paddingBottom: 12, fontSize: 13 }}>Pausar y reanudar necesitan conexión con el host.</Body>
+          <Body muted style={{ paddingHorizontal: 14, paddingBottom: 12, fontSize: TEXT.meta }}>Pausar y reanudar necesitan conexión con el host.</Body>
         )}
       </Section>
 
@@ -490,12 +492,12 @@ function TaskView({ ctx, taskId }) {
         {[...task.attempts].reverse().map((a) => (
           <View key={a.n} style={{ paddingHorizontal: 14, paddingVertical: 10, gap: 3 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>{`Intento ${a.n}`}</Text>
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{`Intento ${a.n}`}</Text>
               <Dot color={a.status === 'failed' ? c.danger : a.status === 'running' ? c.accent : c.inkFaint} size={6} />
-              <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{ATTEMPT_STATUS[a.status]}</Text>
+              <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{ATTEMPT_STATUS[a.status]}</Text>
               <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkMuted }}>{duration(a.startedAt, a.endedAt || now)}</Text>
             </View>
-            <Body muted style={{ fontSize: 13.5 }}>{a.summary}</Body>
+            <Body muted style={{ fontSize: TEXT.secondary }}>{a.summary}</Body>
           </View>
         ))}
       </Section>
@@ -538,8 +540,8 @@ function QuestionView({ ctx, taskId }) {
             >
               <View style={{ width: 18, height: 18, marginTop: 1, borderRadius: 9, borderWidth: on ? 5 : 1.5, borderColor: on ? c.accent : c.inkFaint }} />
               <View style={{ flex: 1, gap: 2 }}>
-                <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>{o.label}</Text>
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.inkMuted }}>{o.detail}</Text>
+                <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}>{o.label}</Text>
+                <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: c.inkMuted }}>{o.detail}</Text>
               </View>
             </Pressable>
           );
@@ -552,7 +554,7 @@ function QuestionView({ ctx, taskId }) {
           placeholder="O escribe otra respuesta"
           placeholderTextColor={c.inkFaint}
           multiline
-          style={{ minHeight: 48, maxHeight: 140, paddingHorizontal: 14, paddingVertical: 12, borderRadius: RADIUS, backgroundColor: c.bgInput, fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}
+          style={{ minHeight: 48, maxHeight: 140, paddingHorizontal: 14, paddingVertical: 12, borderRadius: RADIUS, backgroundColor: c.bgInput, fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}
         />
       )}
       <DecisionFooter
@@ -580,14 +582,14 @@ function ApprovalView({ ctx, taskId }) {
       <ContextBlock ctx={ctx} task={task} />
       <View style={{ padding: 14, borderRadius: RADIUS, backgroundColor: c.codeBg, gap: 6 }}>
         <Eyebrow>Acción</Eyebrow>
-        <Mono style={{ fontSize: 13.5, lineHeight: 20, color: c.ink }}>{p.action}</Mono>
+        <Mono style={{ fontSize: TEXT.secondary, lineHeight: 20, color: c.ink }}>{p.action}</Mono>
       </View>
       <Body>{p.why}</Body>
       <View style={{ gap: 6 }}>
         {p.effects.map((e) => (
           <View key={e} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
             <Icon name="tick" size={15} color={c.inkMuted} />
-            <Body muted style={{ flex: 1, fontSize: 14 }}>{e}</Body>
+            <Body muted style={{ flex: 1, fontSize: TEXT.secondary }}>{e}</Body>
           </View>
         ))}
       </View>
@@ -638,8 +640,8 @@ function ReviewView({ ctx, taskId }) {
         {r.checks.map((ch) => (
           <View key={ch.name} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, minHeight: 40 }}>
             <Dot color={ch.state === 'passed' ? c.good : ch.state === 'failed' ? c.danger : c.warn} />
-            <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14, color: c.inkBody }}>{ch.name}</Text>
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{ch.state === 'passed' ? 'Pasó' : ch.state === 'failed' ? 'Falló' : 'Corriendo'}</Text>
+            <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>{ch.name}</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{ch.state === 'passed' ? 'Pasó' : ch.state === 'failed' ? 'Falló' : 'Corriendo'}</Text>
           </View>
         ))}
       </Section>
@@ -649,7 +651,7 @@ function ReviewView({ ctx, taskId }) {
           {r.risks.map((x) => (
             <View key={x} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Dot color={c.warn} size={6} />
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.warn }}>{x}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.warn }}>{x}</Text>
             </View>
           ))}
         </View>
@@ -664,7 +666,7 @@ function ReviewView({ ctx, taskId }) {
             <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.danger }}>{`−${f.deletions}`}</Text>
           </View>
         ))}
-        {r.files.length > shown.length && <Body muted style={{ paddingHorizontal: 14, paddingVertical: 8, fontSize: 13 }}>{`y ${r.files.length - shown.length} más`}</Body>}
+        {r.files.length > shown.length && <Body muted style={{ paddingHorizontal: 14, paddingVertical: 8, fontSize: TEXT.meta }}>{`y ${r.files.length - shown.length} más`}</Body>}
       </Section>
 
       <DecisionFooter
@@ -684,7 +686,7 @@ function Stat({ label, value, color }) {
   return (
     <View style={{ flex: 1, padding: 12, borderRadius: RADIUS, backgroundColor: c.sheet, gap: 2 }}>
       <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 17, color: color || c.ink }}>{value}</Text>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{label}</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{label}</Text>
     </View>
   );
 }
@@ -740,8 +742,8 @@ function HostRow({ title, detail, state, seen, selected, onPress }) {
     >
       <RowIcon name={state ? 'monitor' : 'layers'} />
       <View style={{ flex: 1, gap: 3 }}>
-        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>{title}</Text>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{detail}</Text>
+        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}>{title}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{detail}</Text>
         {state ? <StateText state={state}>{seen}</StateText> : null}
       </View>
       {selected ? <Icon name="check" size={17} color={c.accent} /> : null}
@@ -779,8 +781,8 @@ function NotificationsView({ ctx }) {
             >
               <View style={{ width: 7 }}>{!n.read && <Dot color={c.accent} />}</View>
               <View style={{ flex: 1, gap: 2 }}>
-                <Text numberOfLines={1} style={{ fontFamily: n.read ? FONTS.ui : FONTS.uiMedium, fontSize: 14.5, color: n.read ? c.inkBody : c.ink }}>{task.title}</Text>
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{KIND[n.kind].label}</Text>
+                <Text numberOfLines={1} style={{ fontFamily: n.read ? FONTS.ui : FONTS.uiMedium, fontSize: TEXT.secondary, color: n.read ? c.inkBody : c.ink }}>{task.title}</Text>
+                <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{KIND[n.kind].label}</Text>
               </View>
               <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkFaint }}>{ago(n.at, now)}</Text>
             </Pressable>
@@ -794,12 +796,12 @@ function NotificationsView({ ctx }) {
           <View style={{ padding: 14, borderRadius: RADIUS, backgroundColor: c.surface3, gap: 4 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Icon name="bell" size={14} color={c.inkMuted} />
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13, color: c.inkMuted }}>Lixbon</Text>
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, color: c.inkMuted }}>Lixbon</Text>
             </View>
-            <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: c.ink }}>{preview.title}</Text>
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkBody }}>{preview.body}</Text>
+            <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.secondary, color: c.ink }}>{preview.title}</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>{preview.body}</Text>
           </View>
-          <Body muted style={{ fontSize: 13, paddingHorizontal: 4 }}>Sin comandos, preguntas ni diffs: se ven al abrir la app.</Body>
+          <Body muted style={{ fontSize: TEXT.meta, paddingHorizontal: 4 }}>Sin comandos, preguntas ni diffs: se ven al abrir la app.</Body>
         </View>
       )}
     </>
@@ -823,12 +825,12 @@ function UsageView({ ctx }) {
         {state.usage.map((u) => (
           <View key={u.id} style={{ padding: 14, borderRadius: RADIUS, backgroundColor: c.sheet, gap: 10, opacity: stale ? 0.7 : 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-              <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>{u.label}</Text>
+              <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}>{u.label}</Text>
               <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 20, color: u.percent >= 90 ? c.danger : c.ink }}>{`${u.percent} %`}</Text>
             </View>
             <Meter value={u.percent / 100} color={u.percent >= 90 ? c.danger : c.accent} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{`${u.window} · se reinicia en ${resetIn(u.resetAt)}`}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{`${u.window} · se reinicia en ${resetIn(u.resetAt)}`}</Text>
               <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: stale ? c.warn : c.inkFaint }}>{ago(stale ? state.syncedAt : u.syncedAt, now)}</Text>
             </View>
           </View>

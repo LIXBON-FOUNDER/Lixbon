@@ -1,3 +1,5 @@
+import { TEXT } from '../theme';
+import { Text, TextInput } from './Typography';
 // dialogs.js — hojas inferiores, confirmaciones y avisos del sistema visual
 // (Modal de RN sin animación propia: la subida y el velo los anima el sheet).
 // API por promesas:
@@ -6,7 +8,7 @@
 //   sheet({ title, render: (close) => <…/> })   contenido propio
 //   toast('Copiado') · toast('Conversación eliminada', { action: { label: 'Deshacer', onPress } })
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Animated, KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Animated, KeyboardAvoidingView, Modal, Pressable, ScrollView,   View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FONTS, MOTION, RADIUS, RADIUS_SM } from '../theme';
@@ -85,8 +87,8 @@ export function SheetTitle({ children, detail }) {
   const c = useColors();
   return (
     <View style={{ marginTop: 8, marginBottom: 8, marginHorizontal: 8, gap: 6 }}>
-      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 19, letterSpacing: -0.2, color: c.ink }}>{children}</Text>
-      {!!detail && <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.ink70 }}>{detail}</Text>}
+      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.title, letterSpacing: -0.2, color: c.ink }}>{children}</Text>
+      {!!detail && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 21, color: c.ink70 }}>{detail}</Text>}
     </View>
   );
 }
@@ -120,18 +122,18 @@ export function SheetItem({ item, onPress }) {
           numberOfLines={1}
           style={{
             fontFamily: item.mono ? FONTS.mono : item.description ? FONTS.uiMedium : FONTS.ui,
-            fontSize: item.mono ? 14 : 15,
+            fontSize: item.mono ? 14 : 16,
             color,
           }}
         >
           {item.label}
         </Text>
-        {!!item.description && <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{item.description}</Text>}
+        {!!item.description && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{item.description}</Text>}
       </View>
-      {!!item.value2 && <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{item.value2}</Text>}
+      {!!item.value2 && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{item.value2}</Text>}
       {!!item.badge && (
         <View style={{ height: 24, justifyContent: 'center', paddingHorizontal: 8, borderRadius: RADIUS_SM, backgroundColor: c.surface4 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.ink70 }}>{item.badge}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink70 }}>{item.badge}</Text>
         </View>
       )}
       {item.selected && <Icon name="check" size={18} color={c.accent} strokeWidth={2} />}
@@ -145,13 +147,13 @@ function SheetButtons({ cancelLabel = 'Cancelar', confirmLabel, danger, onCancel
   return (
     <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, marginHorizontal: 8 }}>
       <Pressable onPress={onCancel} style={({ pressed }) => [btn, { backgroundColor: c.raised, opacity: pressed ? 0.85 : 1 }]}>
-        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.onRaised }}>{cancelLabel}</Text>
+        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.onRaised }}>{cancelLabel}</Text>
       </Pressable>
       <Pressable
         onPress={onConfirm}
-        style={({ pressed }) => [btn, { backgroundColor: danger ? c.dangerSoft : c.primary, transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+        style={({ pressed }) => [btn, { backgroundColor: danger ? c.dangerAction : c.primary, transform: [{ scale: pressed ? 0.98 : 1 }] }]}
       >
-        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: danger ? c.danger : c.onPrimary }}>{confirmLabel || 'Aceptar'}</Text>
+        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.body, color: danger ? c.onDanger : c.onPrimary }}>{confirmLabel || 'Aceptar'}</Text>
       </Pressable>
     </View>
   );
@@ -281,7 +283,7 @@ export function DialogProvider({ children }) {
               borderRadius: RADIUS,
               paddingHorizontal: 14,
               fontFamily: FONTS.uiMedium,
-              fontSize: 16,
+              fontSize: TEXT.body,
               color: c.ink,
             }}
           />
@@ -312,7 +314,7 @@ export function DialogProvider({ children }) {
               <SheetItem key={item.divider ? `d${i}` : String(item.value)} item={item} onPress={() => closeSheet(item.value)} />
             ))}
             {(sheetState?.items || []).length === 0 && (
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted, margin: 12 }}>{sheetState?.emptyLabel || 'Sin opciones.'}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted, margin: 12 }}>{sheetState?.emptyLabel || 'Sin opciones.'}</Text>
             )}
           </ScrollView>
         )}
@@ -346,7 +348,7 @@ export function DialogProvider({ children }) {
             }}
           >
             {!!toastState.icon && <Icon name={toastState.icon} size={17} color={c.accent} strokeWidth={2} />}
-            <Text style={{ flex: 1, paddingVertical: 12, fontFamily: FONTS.ui, fontSize: 14.5, color: c.onRaised }}>{toastState.message}</Text>
+            <Text style={{ flex: 1, paddingVertical: 12, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.onRaised }}>{toastState.message}</Text>
             {!!toastState.action && (
               <Pressable
                 onPress={() => {
@@ -362,7 +364,7 @@ export function DialogProvider({ children }) {
                   backgroundColor: pressed ? 'rgba(255,255,255,0.06)' : 'transparent',
                 })}
               >
-                <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: c.accent }}>{toastState.action.label}</Text>
+                <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.secondary, color: c.accent }}>{toastState.action.label}</Text>
               </Pressable>
             )}
           </View>

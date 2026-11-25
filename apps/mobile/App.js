@@ -32,11 +32,9 @@ import { ACCENTS, FONTS, MOTION } from './src/theme';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
-    [FONTS.brand]: require('./assets/fonts/Fraunces-LightItalic.ttf'),
-    [FONTS.serif]: require('./assets/fonts/SourceSerif4-Regular.ttf'),
-    [FONTS.ui]: require('./assets/fonts/Geist-Regular.ttf'),
-    [FONTS.uiMedium]: require('./assets/fonts/Geist-Medium.ttf'),
-    [FONTS.uiSemiBold]: require('./assets/fonts/Geist-SemiBold.ttf'),
+    [FONTS.serif]: require('../../shared/fonts/fonts/serif/LixbonBrandSerif-Regular.ttf'),
+    [FONTS.ui]: require('../../shared/fonts/fonts/sans/LixbonBrandSans-Regular.ttf'),
+    [FONTS.uiMedium]: require('../../shared/fonts/fonts/sans/LixbonBrandSans-Medium.ttf'),
     [FONTS.mono]: require('./assets/fonts/GeistMono-Regular.ttf'),
     [FONTS.monoMedium]: require('./assets/fonts/GeistMono-Medium.ttf'),
   });

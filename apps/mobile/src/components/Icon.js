@@ -1,3 +1,4 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // Icon.js — iconos SVG de trazo fino, MISMOS paths que la web
 // (apps/web/src/components/Icons.jsx, estilo "7000 FREE UI ICONS"):
 // un solo lenguaje de icono en todo Lixbon. strokeWidth 1.6 como la web.
@@ -105,6 +106,8 @@ const ICONS = {
 };
 
 export default function Icon({ name, size = 20, color = '#000', strokeWidth = 1.6 }) {
+  const status = { permission: 'permission', question: 'question', review: 'review', 'code-error': 'code-error', 'network-blocked': 'network', 'wifi-off': 'wifi-off', 'monitor-off': 'monitor-off', 'terminal-off': 'terminal-off', working: 'working', done: 'done', paused: 'paused', failed: 'failed', bell: 'attention', info: 'info', mail: 'mail' }[name];
+  if (status) return <StatusIcon kind={status} size={size} color={color} />;
   const def = ICONS[name] || { paths: [] };
   const common = {
     stroke: color,

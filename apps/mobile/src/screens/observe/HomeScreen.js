@@ -1,8 +1,10 @@
+import { TEXT } from '../../theme';
+import { Text } from '../../components/Typography';
 // HomeScreen.js — Home de Supervisar (LXO-108): resumen operativo del IDE elegido. Projects con su estado y
 // contadores separados (activas, fallidas, Attention), el trabajo activo global, la Attention por categoría y la
 // salud del Core. Solo resume (sale de la snapshot); el ADE completo está en Desktop.
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable,  View } from 'react-native';
 
 import Icon from '../../components/Icon';
 import { Eyebrow, useColors } from '../../components/ui';
@@ -31,8 +33,8 @@ export function ActiveTaskRow({ task, now, onOpen, showProject = true }) {
   return (
     <RowButton label={activeA11y(task)} onPress={() => onOpen(task.route)}>
       <View style={{ flex: 1, gap: 3 }}>
-        <Text numberOfLines={2} style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>{task.title}</Text>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+        <Text numberOfLines={2} style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{task.title}</Text>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
           {[showProject ? task.projectName : null, task.child ? 'hija' : null, task.origin, task.updatedAt ? ageText(task.updatedAt, now) : null].filter(Boolean).join(' · ')}
         </Text>
       </View>
@@ -68,12 +70,12 @@ export default function HomeScreen({ obs }) {
             {home.attention.categories.map((cat) => (
               <RowButton key={cat.key} label={`${cat.label}: ${cat.count}`} onPress={() => open(cat.route)}>
                 <Icon name={cat.icon} size={18} color={cat.key === 'failed' ? c.danger : c.warn} />
-                <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkBody }}>{cat.label}</Text>
+                <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>{cat.label}</Text>
                 <Text style={{ fontFamily: FONTS.mono, fontSize: 13, color: c.inkMuted }}>{cat.count}</Text>
               </RowButton>
             ))}
             <RowButton label="Ver toda la atención" onPress={() => open(home.attention.route)}>
-              <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>Ver toda la atención</Text>
+              <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>Ver toda la atención</Text>
             </RowButton>
           </>
         )}
@@ -86,11 +88,11 @@ export default function HomeScreen({ obs }) {
         ) : (
           home.active.map((t) => <ActiveTaskRow key={t.id} task={t} now={obs.now} onOpen={open} />)
         )}
-        {home.activeHidden ? <Body muted style={{ fontSize: 12.5 }}>{`Y ${home.activeHidden} más: el resumen enseña las 50 más recientes.`}</Body> : null}
+        {home.activeHidden ? <Body muted style={{ fontSize: TEXT.meta }}>{`Y ${home.activeHidden} más: el resumen enseña las 50 más recientes.`}</Body> : null}
       </View>
 
       <RowButton label="Consultar uso de proveedores" onPress={() => open({ name: 'usage' })}>
-        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>Uso de proveedores</Text>
+        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>Uso de proveedores</Text>
       </RowButton>
 
       <View style={{ gap: 8 }}>
@@ -101,16 +103,16 @@ export default function HomeScreen({ obs }) {
           home.projects.map((p) => (
             <RowButton key={p.id} label={projectA11y(p)} onPress={() => open(p.route)}>
               <View style={{ flex: 1, gap: 3 }}>
-                <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>{p.name}</Text>
-                <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{p.counts}</Text>
+                <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{p.name}</Text>
+                <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{p.counts}</Text>
               </View>
               <StateText tone={p.status.tone}>{p.status.label}</StateText>
             </RowButton>
           ))
         )}
-        {home.projectsHidden ? <Body muted style={{ fontSize: 12.5 }}>{`Y ${home.projectsHidden} más: primero los que piden algo.`}</Body> : null}
+        {home.projectsHidden ? <Body muted style={{ fontSize: TEXT.meta }}>{`Y ${home.projectsHidden} más: primero los que piden algo.`}</Body> : null}
         {home.unassigned.active || home.unassigned.attention ? (
-          <Body muted style={{ fontSize: 12.5 }}>
+          <Body muted style={{ fontSize: TEXT.meta }}>
             {`Sin proyecto: ${home.unassigned.active} activa${home.unassigned.active === 1 ? '' : 's'}${home.unassigned.failed ? ` · ${home.unassigned.failed} fallida${home.unassigned.failed === 1 ? '' : 's'}` : ''}${home.unassigned.attention ? ` · ${home.unassigned.attention} piden atención` : ''}`}
           </Body>
         ) : null}
