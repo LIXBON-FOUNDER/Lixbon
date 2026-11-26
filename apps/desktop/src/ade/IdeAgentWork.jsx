@@ -12,6 +12,7 @@ import { AttemptOwnership } from './AttemptOwnership';
 import { AttemptTransfer } from './AttemptTransfer';
 import { relativeFile } from './f6Contract';
 import './f6.css';
+import { StatusIcon } from '@lixbon/icons/status';
 
 export function relativeEditorFile(root, path) {
   if (!root || !path) return null;
@@ -38,6 +39,7 @@ export function IdeOwnershipBanner({ active, onSelect }) {
   const report = query.status === 'ready' ? query.data : null;
   const owner = report?.owner;
   const select = (a) => onSelect({ project_id: scope.project_id, task_id: a.task_id, attempt_id: a.id ?? a.attempt_id });
+  if (!bound) return <details className="f6-ide f6-ide--unbound"><summary aria-label="AI Work" title="AI Work · Propiedad del workspace"><StatusIcon kind="branch" size={16}/><span className="sr-only">AI Work</span></summary><p>Workspace sin vínculo verificado. Abre un Attempt desde ADE para consultar su propietario.</p></details>;
   return <div className="f6-ide" aria-label="AI Work" role="region">
     {!bound ? <p>AI Work · Workspace sin vínculo verificado. Abre un Attempt desde ADE para consultar su propietario.</p> : <>
       <p>{scope.task_id} / {scope.attempt_id} · {scope.branch ?? 'sin rama'} · {scope.host ?? 'host no informado'} · {scope.root}</p>

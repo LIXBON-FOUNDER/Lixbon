@@ -7,6 +7,12 @@ import { Segmented } from '../../../components/Segmented';
 import { IconShield } from '../../../components/Icons';
 import { PageHead, SectionHead } from '../SettingsParts';
 import { CommandAllowlist } from '../CommandAllowlist';
+import { useAppStore } from '../../../store/appStore';
+import { projectCommands, useProjectCommands } from '../../../store/projectCommands';
+import { useEffect, useRef, useState } from 'react';
+import { isNeverAutoCommand } from '../../../lib/agentProtocol';
+
+const ALWAYS_ASK_EXAMPLES = ['rm -rf', 'curl'].filter(isNeverAutoCommand);
 
 const CATEGORIES = [
   { id: 'read', label: 'Leer y buscar', hint: 'Leer archivos, listar, buscar texto y ver la estructura del código.', tools: 'read_file · list_files · find_files · search · outline' },
@@ -37,6 +43,13 @@ const POLICY_OPTIONS = [
 ];
 
 export function AgentPage() {
+  const [commandsOpen, setCommandsOpen] = useState(false);
+  const commandsRef = useRef(null);
+  useEffect(() => { if (commandsOpen) commandsRef.current?.querySelector('.allow__add input')?.focus(); }, [commandsOpen]);
+  const root = useAppStore((state) => state.workspaceRoot);
+  const projects = useProjectCommands((state) => state.projects);
+  const removeCommand = useProjectCommands((state) => state.remove);
+  const savedCommands = projectCommands(root, projects);
   const {
     chatMode, setChatMode,
     toolPolicy, setToolPolicy, commandAllowlist, setCommandAllowlist,
@@ -44,36 +57,40 @@ export function AgentPage() {
   const mcpTools = useMcpStore((s) => s.agentTools().length);
   const preset = Object.entries(PRESETS).find(([, p]) => Object.keys(p).every((k) => p[k] === toolPolicy[k]))?.[0] || 'custom';
   const applyPreset = (id) => Object.entries(PRESETS[id]).forEach(([k, v]) => setToolPolicy(k, v));
+  const visibleCommands = [...new Set([...savedCommands, ...commandAllowlist])];
 
   return (
-    <div className="spage">
-      <PageHead icon={IconShield} title="Agente y permisos" sub="Decide qué puede hacer el agente de Lixbon sin preguntarte." />
+    <div className="spage agent-settings">
+      <PageHead icon={IconShield} title="Agentes y permisos" sub="Valen para el modo Agente, el editor y los intentos del ADE" />
 
       <section className="ssec rise rise--1">
-        <SectionHead label="Comportamiento" />
         <div className="ssec ssec--card ssec--rows">
           <div className="srow">
             <div className="srow__text">
               <span className="srow__label">Modo por defecto</span>
-              <span className="srow__hint">Con el que empieza cada conversación. En el chat se alterna con Shift+Tab o Ctrl+.</span>
+              <span className="srow__hint">Lo que el agente hace sin preguntarte</span>
             </div>
             <Segmented width={96} value={chatMode} onChange={setChatMode} options={CHAT_MODES.map((m) => ({ value: m.id, label: m.label }))} />
           </div>
-          <div className="srow">
-            <div className="srow__text">
-              <span className="srow__label">Autonomía</span>
-              <span className="srow__hint">{PRESET_HINT[preset]}</span>
-            </div>
-            <Segmented
-              width={96}
-              value={preset}
-              onChange={applyPreset}
-              options={[{ value: 'careful', label: 'Cauteloso' }, { value: 'balanced', label: 'Equilibrado' }, { value: 'auto', label: 'Autónomo' }]}
-            />
-          </div>
+          <div className="srow agent-settings-row"><div className="srow__text"><span className="srow__label">Comandos permitidos</span><span className="srow__hint">{toolPolicy.command === 'ask' ? 'Se ejecutan sin pedir permiso' : toolPolicy.command === 'never' ? 'La ejecución de comandos está bloqueada' : 'La ejecución de comandos está permitida'}</span></div><div className="allow__chips">{visibleCommands.slice(0,2).map(command=><span className="allow__chip mono" key={command} title={savedCommands.includes(command) ? 'Comando exacto de este proyecto' : 'Prefijo de la lista del agente'}>{command}</span>)}{visibleCommands.length>2 && <button type="button" className="lk" onClick={()=>setCommandsOpen(true)}>+{visibleCommands.length-2}</button>}<button type="button" className="btn btn--ghost" onClick={()=>setCommandsOpen(true)}>Añadir comando</button></div></div>
+          <div className="srow agent-settings-row"><div className="srow__text"><span className="srow__label">Siempre con permiso</span><span className="srow__hint">Te pregunta antes, en cualquier modo</span></div><div className="allow__chips">{ALWAYS_ASK_EXAMPLES.map(command=><span className="allow__chip mono" key={command}>{command}</span>)}</div></div>
+          <div className="srow"><div className="srow__text"><span className="srow__label">Red</span><span className="srow__hint">Descargas y peticiones del agente</span></div><span className="srow__value">{{allow:'Permitida',ask:'Te pregunta antes',never:'Bloqueada'}[toolPolicy.web] || 'No informado'}</span></div>
+          <div className="srow"><div className="srow__text"><span className="srow__label">Tope de gasto por tarea</span></div><span className="srow__value">No informado</span></div>
         </div>
       </section>
 
+      <details className="agent-settings-details" ref={commandsRef} open={commandsOpen} onToggle={event=>setCommandsOpen(event.currentTarget.open)}><summary>Listas de comandos</summary><div className="agent-settings-details__body">
+      <section className="ssec project-permissions">
+        <SectionHead label="Siempre en este proyecto" hint={root ? 'Comandos exactos guardados desde las tarjetas de permiso. Puedes quitarlos aquí.' : 'Abre una carpeta para ver sus permisos.'} />
+        <div className="allow__chips">
+          {savedCommands.map((command) => <span className="allow__chip mono" key={command}>{command}<button className="allow__x" aria-label={`Quitar ${command} de este proyecto`} onClick={() => removeCommand(root, command)}>×</button></span>)}
+          {root && !savedCommands.length && <span className="srow__hint">No hay permisos guardados para este proyecto.</span>}
+        </div>
+      </section>
+      <CommandAllowlist list={commandAllowlist} onChange={setCommandAllowlist} commandPolicy={toolPolicy.command || 'ask'} />
+      </div></details>
+      <details className="agent-settings-details"><summary>Autonomía y permisos por herramienta</summary><div className="agent-settings-details__body">
+      <div className="srow"><div className="srow__text"><span className="srow__label">Autonomía</span><span className="srow__hint">{PRESET_HINT[preset]}</span></div><Segmented width={96} value={preset} onChange={applyPreset} options={[{value:'careful',label:'Cauteloso'},{value:'balanced',label:'Equilibrado'},{value:'auto',label:'Autónomo'}]} /></div>
       <section className="ssec rise rise--2">
         <SectionHead label="Permisos por herramienta" hint="Afinan el preajuste de autonomía. Cambiar uno lo convierte en personalizado." />
         <div className="ssec ssec--card ssec--rows">
@@ -89,8 +106,8 @@ export function AgentPage() {
           ))}
         </div>
       </section>
+      </div></details>
 
-      <CommandAllowlist list={commandAllowlist} onChange={setCommandAllowlist} commandPolicy={toolPolicy.command || 'ask'} />
     </div>
   );
 }

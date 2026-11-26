@@ -38,6 +38,7 @@ export async function streamChatCompletion({
   numCtx = null,
   webSearch = false,
   noPersist = false,
+  think,
 }) {
   const abrir = (token) => fetch(`${serverUrl}/v1/chat/completions`, {
     method: 'POST',
@@ -47,7 +48,7 @@ export async function streamChatCompletion({
     },
     body: JSON.stringify({
       model,
-      messages,
+      ...(think !== undefined ? { think } : {}),      messages,
       conversation_id: conversationId,
       stream: true,
       web_search: webSearch,

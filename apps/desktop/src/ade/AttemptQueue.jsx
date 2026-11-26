@@ -5,6 +5,9 @@ import { describeCapability, providerOf } from './capabilityModel';
 import { queryAdeCore } from './coreQueries';
 import { useCoreQuery } from './useCoreQuery';
 import { useProviderCapabilities } from './useProviderCapabilities';
+import { IconArrowUp } from '../components/Icons';
+import { ProviderMark } from '../orch/agent/ProviderMark';
+import { providerName } from '../orch/agent/agentIdentity';
 
 /** El cuerpo de una instrucción admite hasta 20 000 caracteres (el Core lo vuelve a comprobar). */
 export const MAX_QUEUE_CHARS = 20000;
@@ -202,14 +205,15 @@ export function AttemptQueue({ attempt, active = true, contextSource }) {
 
   return (
     <section className="aq" aria-label="Instrucciones en cola" data-testid="attempt-queue">
-      <div className="aq__head">
-        <h4 className="ssec__label">Instrucciones en cola</h4>
-        <span className="aq__count" data-testid="aq-count" aria-live="polite">{items.length === 1 ? '1 pendiente' : `${items.length} pendientes`}</span>
+      <div className={`aq__head${data && items.length === 0 ? ' aq__head--empty' : ''}`}>
+        <h4 className="ssec__label">Pendientes</h4>
+        <span className="aq__count" data-testid="aq-count" aria-live="polite">{data ? items.length === 1 ? '1 pendiente' : `${items.length} pendientes` : 'Cola no informada'}</span>
       </div>
 
       {running && (
         <div className="aq__composer" data-testid="aq-composer">
-          <div className="aq__modes" role="radiogroup" aria-label="Qué hace enviar">
+          <div className="aq__toolbar">
+          <details className="aq__send-options"><summary>{spec.action}</summary><div className="aq__modes" role="radiogroup" aria-label="Qué hace enviar">
             {MODE_ORDER.map((id) => {
               const info = modes[id];
               const enabled = Boolean(info?.enabled);
@@ -228,6 +232,8 @@ export function AttemptQueue({ attempt, active = true, contextSource }) {
                 </label>
               );
             })}
+          </div><p className="aq__hint" data-testid="aq-enter-hint">{spec.hint}</p></details>
+          <span className="aq__model" title={`${providerName(attempt.provider)} · ${attempt.model || 'Modelo no informado'}`}><ProviderMark provider={attempt.provider} size={14} />{attempt.model || providerName(attempt.provider)}</span>
           </div>
           {contextSource && <button type="button" className="lk" disabled={busy || !active} onClick={async () => {
             setBusy(true); setError(null);
@@ -242,6 +248,7 @@ export function AttemptQueue({ attempt, active = true, contextSource }) {
           }}>Añadir referencia del archivo actual</button>}
           <textarea
             className="aq__text"
+            placeholder="Añade una instrucción para el siguiente paso…"
             aria-label="Instrucción para el intento"
             rows={3}
             maxLength={MAX_QUEUE_CHARS}
@@ -251,7 +258,6 @@ export function AttemptQueue({ attempt, active = true, contextSource }) {
             onKeyDown={onKeyDown}
             data-testid="aq-text"
           />
-          <p className="aq__hint" data-testid="aq-enter-hint">{spec.hint}</p>
           {blocked && <p className="cap-note cap-note--warn" role="status" data-testid="aq-blocked">{blocked}</p>}
           {confirming && (
             <div className="ade-notice ade-notice--warn" role="alertdialog" aria-label="Confirmar detener y enviar" data-testid="aq-confirm">
@@ -263,7 +269,7 @@ export function AttemptQueue({ attempt, active = true, contextSource }) {
             </div>
           )}
           <div className="nat__actions">
-            <button type="button" className="btn btn--primary btn--sm" disabled={busy || !body || Boolean(blocked) || confirming} onClick={send} data-testid="aq-send">{busy ? spec.working : spec.action}</button>
+            <button type="button" className="btn btn--primary btn--sm aq__send" disabled={busy || !body || Boolean(blocked) || confirming} onClick={send} data-testid="aq-send" aria-label={busy ? spec.working : spec.action} title={busy ? spec.working : spec.action}><IconArrowUp size={16} /><span className="sr-only">{busy ? spec.working : spec.action}</span></button>
           </div>
           {sent && <p role="status" data-testid="aq-sent">{sent}</p>}
           {error && (

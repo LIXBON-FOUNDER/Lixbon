@@ -1,62 +1,20 @@
-// EditorPage.jsx — Ajustes → Interfaz y editor: tamaño del IDE, cómo se ve el
-// código y el terminal por defecto.
-import { useEffect, useState } from 'react';
+// Ajustes → Editor: código y terminal. Tema y escala viven en Apariencia.
 import { useWorkbenchStore } from '../../../store/workbenchStore';
 import { useTerminalStore, SHELL_OPTIONS } from '../../../store/terminalStore';
 import { Segmented } from '../../../components/Segmented';
 import { Switch } from '../../../components/Switch';
 import { Select } from '../../../components/Select';
 import { IconCode } from '../../../components/Icons';
-import { useTheme } from '../../../lib/theme';
-import { UI_SCALES, readUiScale, setUiScale } from '../../../lib/uiScale';
 import { PageHead, SectionHead } from '../SettingsParts';
 
 export function EditorPage() {
   const editor = useWorkbenchStore((s) => s.editor);
   const setOption = useWorkbenchStore((s) => s.setEditorOption);
   const { defaultShell, setDefaultShell } = useTerminalStore();
-  const [theme, setTheme] = useTheme();
-  const [scale, setScale] = useState(readUiScale);
-
-  useEffect(() => {
-    const onScale = (e) => setScale(e.detail);
-    window.addEventListener('lixbon:ui-scale', onScale);
-    return () => window.removeEventListener('lixbon:ui-scale', onScale);
-  }, []);
 
   return (
     <div className="spage">
-      <PageHead icon={IconCode} title="Interfaz y editor" sub="Cómo se ve el IDE, el código y el terminal." />
-
-      <section className="ssec rise rise--1">
-        <SectionHead label="Interfaz" />
-        <div className="ssec ssec--card ssec--rows">
-          <div className="srow">
-            <div className="srow__text">
-              <span className="srow__label">Tema</span>
-              <span className="srow__hint">Sistema sigue el modo claro u oscuro de tu equipo.</span>
-            </div>
-            <Segmented
-              size="sm"
-              width={64}
-              value={theme}
-              onChange={setTheme}
-              options={[
-                { value: 'system', label: 'Sistema' },
-                { value: 'light', label: 'Claro' },
-                { value: 'dark', label: 'Oscuro' },
-              ]}
-            />
-          </div>
-          <div className="srow">
-            <div className="srow__text">
-              <span className="srow__label">Tamaño de la interfaz</span>
-              <span className="srow__hint">Todo el IDE y Lixbon Team. También con Ctrl + y Ctrl −; Ctrl 0 vuelve al predeterminado.</span>
-            </div>
-            <Segmented size="sm" width={48} value={scale} onChange={setUiScale} options={UI_SCALES.map((n) => ({ value: n, label: `${Math.round(n * 100)}%` }))} />
-          </div>
-        </div>
-      </section>
+      <PageHead icon={IconCode} title="Editor" sub="Cómo se ve el código y el terminal." />
 
       <section className="ssec rise rise--2">
         <SectionHead label="Editor" />

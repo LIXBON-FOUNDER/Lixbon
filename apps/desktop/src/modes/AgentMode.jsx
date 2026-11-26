@@ -1,3 +1,5 @@
+import { StatusIcon } from '@lixbon/icons/status';
+import { ActivityRail } from './ActivityRail';
 // AgentMode.jsx — el agente a pantalla completa: conversaciones, chat y los
 // cambios que va haciendo.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -36,7 +38,7 @@ function NewMenu({ providers }) {
   return (
     <>
       <button ref={ref} className="btn btn--primary btn--sm" onClick={() => setOpen((v) => !v)}>
-        <IconPlus size={13} /> Nuevo <IconChevronDown size={11} />
+        <IconPlus size={13} /> Nueva <IconChevronDown size={11} />
       </button>
       <Popover anchorRef={ref} open={open} onClose={close} align="right" className="menu newagent">
         <button className="menu__item" onClick={() => pick('lixbon')}><LogoMark size={14} /><span className="menu__main">Agente de Lixbon</span><span className="menu__kbd">Ctrl N</span></button>
@@ -50,6 +52,8 @@ export function AgentMode() {
   const sizes = useWorkbenchStore((s) => s.sizes);
   const panels = useWorkbenchStore((s) => s.modePanels.agent);
   const { workspaceRoot, currentModel, openModal } = useAppStore();
+  const streaming = useChatStore((state) => state.streaming);
+  const pending = useChatStore((state) => !!state.pendingApproval || !!state.pendingQuestion);
   const branch = useGitStore((s) => s.branch);
   const { conversationTitle, engine } = useChatStore();
   const ccModel = useChatStore((s) => {
@@ -68,10 +72,11 @@ export function AgentMode() {
 
   return (
     <div className="wb wb--agent">
+      <ActivityRail />
       <Collapse open={panels.left} size={sizes.sessions + GAP}>
         <Panel id="sessions" className="sessions">
           <div className="panelhead">
-            <span className="panelhead__title">Agentes</span>
+            <span className="panelhead__title">Conversaciones</span>
             <div className="panelhead__fill" />
             <NewMenu providers={providers} />
           </div>
@@ -88,6 +93,7 @@ export function AgentMode() {
             {codexView === 'term' && codexTab ? <span className="mono agentmain__meta">{codexTab.cwd}</span> : meta && <span className="mono agentmain__meta">{meta}</span>}
           </div>
           <div className="panelhead__fill" />
+          {(streaming || pending) && <span className={`agentmain__status ${pending ? 'is-waiting' : ''}`}><StatusIcon kind={pending ? 'permission' : 'working'} size={15} />{pending ? 'Te necesita' : 'Trabajando'}</span>}
           <button className="ic" onClick={() => openModal('remote')} title="Seguir desde el móvil"><IconDevice size={16} /></button>
           <button className="ic" onClick={() => runCommand('chat.saveMarkdown')} title="Exportar a Markdown"><IconDownload size={16} /></button>
         </div>
