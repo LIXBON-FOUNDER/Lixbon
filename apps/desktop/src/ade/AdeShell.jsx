@@ -530,6 +530,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
     limit: 50,
   }, { enabled: projectTasksActive });
   const projectTaskContinuation = useProjectTaskContinuation(selectedProjectId, projectTasks, projectTasksActive);
+  const mapAttemptSummaries = useCoreQuery('task_list_v2', { project_id: selectedProjectId }, { enabled: Boolean(workspaceActive && workspaceView === 'map' && selectedProjectId && coreModel.vNext) });
   const projectAttention = useCoreQuery('attention_list', {
     project_id: selectedProjectId,
   }, { enabled: projectViewActive });
@@ -620,6 +621,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   };
   const projectTaskDtos = projectTaskContinuation.items
     ?? uniqueProjectTasks(Array.isArray(projectTasks.data?.tasks) ? projectTasks.data.tasks : []);
+  const mapSummaryByTask = new Map((mapAttemptSummaries.data?.items || []).map(task => [task.id, task]));
+  const mapTaskDtos = projectTaskDtos.map(task => mapSummaryByTask.has(task.id) ? {...task,...mapSummaryByTask.get(task.id)} : task);
   const projectTaskItems = projectTaskDtos.map((task) => ({ task_id: task.id, title: task.title, status: task.status }));
   const projectTaskSlice = {
     ...projectViewSlice(projectTasks, projectTaskItems, { hasMore: projectTaskContinuation.hasMore }),
@@ -1107,8 +1110,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               <header><h1>Comparar intentos</h1><p>Elige los intentos de una misma tarea para comparar su evidencia.</p></header>
               {selectedTaskId ? <AttemptHistory onComparisonChange={setComparisonSnapshot} taskId={selectedTaskId} coreModel={coreModel} active={workspaceActive && workspaceView === 'compare'} selectedAttemptId={selectedAttemptId} onSelectAttempt={(attemptId) => selectAttempt({projectId: selectedProjectId, taskId: selectedTaskId, attemptId})} onBack={() => changeWorkspaceView('workspace')} /> : <div className="ade-view-empty">Selecciona una tarea en Trabajo para ver sus intentos.</div>}
             </div>
-            <div className="ade-view-panel" role="tabpanel" id={`${viewIds}-panel-map`} aria-labelledby={`${viewIds}-tab-map`} hidden={workspaceView !== 'map'}><CoreTaskMap key={selectedProjectId || 'none'} projectId={selectedProjectId} projectName={selectedProjectName} tasks={projectTaskDtos} status={projectTasks.status} error={projectTasks.error} onRetry={projectTasks.retry} hasMore={projectTaskContinuation.hasMore} onLoadMore={projectTaskContinuation.loadMore} onOpenTask={selectTask} /></div>
-            {workspaceView === 'hosts' && <CoreHosts projectId={selectedProjectId} inventory={projectInventory.data} status={resourceInventoryStatus(projectInventory)} onRetry={projectInventory.retry} />}
+            <div className="ade-view-panel" role="tabpanel" id={`${viewIds}-panel-map`} aria-labelledby={`${viewIds}-tab-map`} hidden={workspaceView !== 'map'}><CoreTaskMap key={selectedProjectId || 'none'} projectId={selectedProjectId} projectName={selectedProjectName} tasks={mapTaskDtos} summaryPartial={coreModel.vNext && (Boolean(mapAttemptSummaries.data?.next_cursor) || Boolean(mapAttemptSummaries.error))} status={projectTasks.status} error={projectTasks.error} onRetry={projectTasks.retry} hasMore={projectTaskContinuation.hasMore} onLoadMore={projectTaskContinuation.loadMore} onOpenTask={selectTask} onOpenAttempt={({taskId,attemptId})=>selectAttempt({projectId:selectedProjectId,taskId,attemptId})} active={workspaceActive && workspaceView === 'map'} /></div>
+            {workspaceView === 'hosts' && <CoreHosts projectId={selectedProjectId} inventory={projectInventory.data} status={resourceInventoryStatus(projectInventory)} onRetry={projectInventory.retry} onOpenTask={selectTask} />}
             {workspaceView === 'integrations' && <CoreIntegrations />}
           </Panel>
 
@@ -1129,7 +1132,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               const next = event.key === 'ArrowRight' ? (index + 1) % keys.length : event.key === 'ArrowLeft' ? (index + keys.length - 1) % keys.length : event.key === 'Home' ? 0 : event.key === 'End' ? keys.length - 1 : null;
               if (next !== null) { event.preventDefault(); setInspectorTab(keys[next]); event.currentTarget.querySelectorAll('[role="tab"]')[next]?.focus(); }
             }}>{[['task', 'Tarea'], ['changes', 'Cambios'], ['context', 'Contexto'], ['autonomy', 'Autonomía']].map(([id, label]) => <button type="button" role="tab" key={id} id={`${viewIds}-inspector-tab-${id}`} aria-controls={`${viewIds}-inspector-${id}`} aria-selected={inspectorTab === id} tabIndex={inspectorTab === id ? 0 : -1} className={inspectorTab === id ? 'is-active' : ''} onClick={() => setInspectorTab(id)}>{label}</button>)}</div>
-            <div className="ade__inspector-content" role="tabpanel" id={`${viewIds}-inspector-${inspectorTab}`} aria-labelledby={`${viewIds}-inspector-tab-${inspectorTab}`}>
+            <div className={`ade__inspector-content${inspectorTab !== 'task' ? ' ade__inspector-content--detail' : ''}`} role="tabpanel" id={`${viewIds}-inspector-${inspectorTab}`} aria-labelledby={`${viewIds}-inspector-tab-${inspectorTab}`}>
               {inspectorTab === 'task' && <>
               <details className="ade__inspector-section ade-selection-details"><summary>Identificadores</summary>
                 <div className="ssec__label">Selección ADE</div>
@@ -1141,9 +1144,9 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               {selectedTaskId && <TaskWorkspace {...workspaceProps} variant="inspector" />}
               {selectedTaskId && coreModel.vNext && <details className="ade-task-actions"><summary>Acciones de la tarea</summary><AttemptTransfer key={selectedTaskId} task={{ id: selectedTaskId }} projectId={selectedProjectId} active={workspaceActive} /></details>}
               </>}
-              {inspectorTab === 'changes' && <CoreChanges attemptId={selectedAttemptId} active={workspaceActive} onReview={() => { changeWorkspaceView('workspace'); setRequestedAttemptTab({tab: 'changes'}); }} />}
-              {inspectorTab === 'context' && <CoreContext />}
-              {inspectorTab === 'autonomy' && <CoreAutonomy projectId={selectedProjectId} attemptId={selectedAttemptId} active={workspaceActive} />}
+              {inspectorTab === 'changes' && <CoreChanges key={selectedAttemptId} attemptId={selectedAttemptId} attempt={selectedAttempt} active={workspaceActive} onReview={() => { changeWorkspaceView('workspace'); setRequestedAttemptTab({tab: 'changes'}); }} />}
+              {inspectorTab === 'context' && <CoreContext key={`${selectedProjectId}:${selectedAttemptId}`} projectId={selectedProjectId} attemptId={selectedAttemptId} active={workspaceActive} />}
+              {inspectorTab === 'autonomy' && <CoreAutonomy projectId={selectedProjectId} attemptId={selectedAttemptId} profile={selectedAttempt?.profile} active={workspaceActive} />}
             </div>
           </RightDock>
         </div>
