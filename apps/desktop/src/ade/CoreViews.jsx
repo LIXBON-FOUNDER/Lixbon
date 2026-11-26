@@ -7,6 +7,7 @@ import { ResourcesInventory } from './ResourcesInventory';
 import { ServiceMark } from '../components/ServiceMark';
 import { TASK_STATUS_LABELS } from './projectsSidebarModel';
 import { NewAttemptForm } from './NewAttemptForm';
+import { IconPlus } from '../components/Icons';
 
 export { CoreTaskMap } from './CoreTaskMap';
 
@@ -18,7 +19,7 @@ export function CoreHosts({ projectId, inventory, status, onRetry, onOpenTask })
     if (machine && item.target.machine === machine && item.target.project_id === projectId && typeof item.owner?.task_id === 'string') work.set(item.owner.task_id, {id:item.owner.task_id,status:item.owner.status,branch:item.git?.branch});
   }
   return <div className="ade-core-hosts">
-    <aside><header><h2>Hosts</h2><button type="button" className="btn btn--ghost" onClick={() => openModal('remote')}>Conectar un host</button></header>{machine ? <div className="ade-core-hosts__selected"><StatusIcon kind="server" size={20} /><span><b>{machine}</b><small>Equipo informado por el inventario</small></span></div> : <p>No hay hosts informados.</p>}</aside>
+    <aside><header><h2>Hosts</h2><button type="button" className="btn btn--ghost" onClick={() => openModal('remote')}><IconPlus size={16} />Conectar un host</button></header>{machine ? <div className="ade-core-hosts__selected"><StatusIcon kind="server" size={16} /><span><b>{machine}</b><small>Equipo informado por el inventario</small></span></div> : <p>No hay hosts informados.</p>}</aside>
     <main><header><h1>{machine || 'Hosts'}</h1><p>Estado de conexión · No informado</p></header><div className="ade-core-hosts__metrics">{['Intentos', 'CPU', 'Memoria'].map((label) => <article key={label}><span>{label}</span><b>No informado</b></article>)}</div><h2>En este host</h2><p>No hay una lista de intentos por host informada.</p>{work.size > 0 && <section className="ade-core-hosts__work"><h3>Trabajo del inventario</h3>{Array.from(work.values()).map(task => <button type="button" key={task.id} disabled={!onOpenTask} onClick={()=>onOpenTask?.(task.id)}><StatusIcon kind="branch" size={16} /><span><b>{task.id}</b><small>{TASK_STATUS_LABELS[task.status] || task.status || 'Estado no informado'}{task.branch ? ` · ${task.branch}` : ''}</small></span></button>)}</section>}<details><summary>Inventario de recursos del proyecto</summary>{projectId ? <ResourcesInventory inventory={inventory} status={status} onRetry={onRetry} projectId={projectId} /> : <p>Selecciona un proyecto en Trabajo para consultar su inventario.</p>}</details></main>
   </div>;
 }

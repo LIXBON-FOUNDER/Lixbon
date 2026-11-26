@@ -71,18 +71,17 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 .modelmenu__settings { display: flex; width: 100%; justify-content: space-between; padding: 10px 14px; font-size: 13px; }
 @keyframes modelmenu-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .modelmenu { animation: none; } }
-.modelmenu { background: var(--modelmenu-surface, var(--surface-3)); }
-html[data-ui='ide']:not([data-theme='light']) .modelmenu { --modelmenu-surface: #262626; --modelmenu-inset: #1E1E1E; }
+.modelmenu { background: var(--pop, var(--surface-3)); }
 .modelmenu [role='menu'] { display: flex; flex-direction: column; gap: 6px; }
 .modelmenu__head { padding: 6px 14px 2px; }
-.modelmenu__group { display: flex; flex-direction: column; padding: 4px; border-radius: 9px; background: var(--modelmenu-inset, var(--surface-2)); }
+.modelmenu__group { display: flex; flex-direction: column; padding: 4px; border-radius: 9px; background: var(--pop-in, var(--surface-2)); }
 .modelmenu__item { padding: 8px 10px; }
 .modelmenu__item > svg, .modelchip > svg { flex: none; }
 .modelmenu__name { font-weight: 400; overflow-wrap: anywhere; }
 .modelmenu__description { line-height: 1.4; }
 .modelmenu__reason { padding: 6px 14px 2px; }
 .modelmenu__hint { margin: 2px 14px 4px; }
-.modelmenu__settings { background: var(--modelmenu-inset, var(--surface-2)); border-radius: 9px; }
+.modelmenu__settings { background: var(--pop-in, var(--surface-2)); border-radius: 9px; }
 .modelchip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modelchip__level { flex: none; }
 
@@ -130,17 +129,27 @@ html[data-ui='ide']:not([data-theme='light']) .modelmenu { --modelmenu-surface: 
 [data-ui='ide'] .quickopen__input, [data-ui='ide'] .tsearch.is-open .tsearch__input { font-size: 16px; }
 [data-ui='ide'] .quickopen__list { border-radius: 10px; padding: 6px; background: var(--surface-2); }
 [data-ui='ide'] .quickopen__item { min-height: 36px; padding: 0 12px; gap: 12px; font-size: 14px; }
-[data-ui='ide'] .sm { width: min(920px, calc(100vw - 48px)); border-radius: 16px; }
+[data-ui='ide'] .sm { width: min(940px, calc(100vw - 64px)); height: min(640px, 100%); border-radius: 14px; }
 [data-ui='ide'] .sm__head { min-height: 76px; padding: 0 24px; }
 [data-ui='ide'] .sm__title { font-family: var(--font-display); font-weight: 400; font-size: 28px; }
-[data-ui='ide'] .sm__nav { width: 220px; }
+[data-ui='ide'] .sm__nav { width: 230px; padding: 20px 10px; background: var(--surface-2); }
 [data-ui='ide'] .sm__item { height: 36px; font-size: 14px; padding: 0 12px; gap: 10px; }
-[data-ui='ide'] .sm__body { padding: 24px 28px; }
+[data-ui='ide'] .sm__body { padding: 0; }
+[data-ui='ide'] .sm__body .settingsbody__inner { padding: 26px 32px; }
 [data-ui='ide'] .srow { min-height: 64px; gap: 20px; }
 [data-ui='ide'] .srow__label { font-size: 14px; }
 [data-ui='ide'] .srow__hint { font-size: 13px; line-height: 1.5; }
 [data-ui='ide'] .ssec--card { padding: 0; background: transparent; }
 [data-ui='ide'] .allow__chip { padding: 6px 10px; border-radius: 6px; font-weight: 400; }
+[data-ui='ide'] .agent-settings-row { align-items: flex-start; }
+[data-ui='ide'] .agent-settings-row > .allow__chips { flex: 0 1 300px; justify-content: flex-end; padding-top: 0; }
+[data-ui='ide'] .agent-settings-row .allow__chip { font-size: 13px; line-height: 18px; }
+[data-ui='ide'] .allow__chip.mono, [data-ui='ide'] .allow__tool.mono, [data-ui='ide'] .allow__input > input.mono { font-family: var(--font-mono); font-weight: 400; font-variant-ligatures: none; }
+[data-ui='ide'] .agent-settings-row .btn, [data-ui='ide'] .agent-settings-row .lk { font-size: 13px; min-height: 30px; }
+[data-ui='ide'] .agent-settings-details { font-size: 13px; color: var(--ink-muted); }
+[data-ui='ide'] .agent-settings-details > summary { cursor: pointer; }
+[data-ui='ide'] .agent-settings-details__body { display: flex; flex-direction: column; gap: 22px; padding: 20px 0 0; }
+[data-ui='ide'] .agent-settings .spage__icon { display: none; }
 @media (max-width: 760px) { [data-ui='ide'] .prob__row { flex-wrap: wrap; } [data-ui='ide'] .sm__body { padding: 16px; } }
 @media (min-width: 1180px) { [data-ui='ide'] .modeswitch { --tab-w: 82px; } [data-ui='ide'] .modeswitch__label { display: inline; } }
 [data-ui='ide'] .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

@@ -64,21 +64,23 @@ html[data-ui='ide']:not([data-theme='light']) {
   --ink-dim: var(--ink-muted);
   --ink-mid: var(--ink-muted);
   --ink-rgb: 255, 255, 255;
-  --ok: #2FB344;
-  --ok-soft: rgba(47, 179, 68, .18);
+  --ok: #5DBB7C;
+  --ok-soft: rgba(93, 187, 124, .15);
   --good: var(--ok);
   --good-soft: var(--ok-soft);
-  --good-rgb: 47, 179, 68;
-  --warn: #F5A524;
-  --warn-soft: rgba(245, 165, 36, .18);
-  --warn-rgb: 245, 165, 36;
-  --danger: #F25539;
-  --danger-ink: #FF9B85;
-  --danger-soft: rgba(242, 85, 57, .18);
-  --danger-rgb: 242, 85, 57;
-  --info: #4C9AFF;
-  --info-soft: rgba(76, 154, 255, .18);
-  --info-rgb: 76, 154, 255;
+  --good-rgb: 93, 187, 124;
+  --warn: #D99A3C;
+  --warn-soft: rgba(217, 154, 60, .14);
+  --warn-rgb: 217, 154, 60;
+  --danger: #E0683A;
+  --danger-ink: #F0A27A;
+  --danger-soft: rgba(224, 104, 58, .14);
+  --danger-rgb: 224, 104, 58;
+  --info: #6FA8F5;
+  --info-soft: rgba(111, 168, 245, .15);
+  --info-rgb: 111, 168, 245;
+  --pop: #262626;
+  --pop-in: #1E1E1E;
 }
 
 html[data-ui='ide'][data-theme='light'] {

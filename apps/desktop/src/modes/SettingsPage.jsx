@@ -11,6 +11,7 @@ import { ProfilePage } from '../sections/Settings/pages/ProfilePage';
 import { UsagePage } from '../sections/Settings/pages/UsagePage';
 import { AgentPage } from '../sections/Settings/pages/AgentPage';
 import { EditorPage } from '../sections/Settings/pages/EditorPage';
+import { AppearancePage } from '../sections/Settings/pages/AppearancePage';
 import { ServerPage } from '../sections/Settings/pages/ServerPage';
 import { OrchestratorPage } from '../sections/Settings/pages/OrchestratorPage';
 import { McpPage } from '../sections/Settings/pages/McpPage';
@@ -39,9 +40,10 @@ const GROUPS = [
     { id: 'skills', label: 'Skills', icon: IconBook, keywords: 'skills comandos catalogo instalar adversary marketing calificar version', Page: SkillsPage },
   ] },
   { label: 'Espacio de trabajo', items: [
-    { id: 'editor', label: 'Interfaz y editor', icon: IconAppearance, keywords: 'interfaz tamaño zoom letra tipografia editor fuente tabulacion ajuste linea terminal shell', Page: EditorPage },
+    { id: 'editor', label: 'Editor', icon: IconCode, keywords: 'editor fuente tabulacion ajuste linea terminal shell', Page: EditorPage },
     { id: 'git', label: 'Git', icon: IconGitBranch, keywords: 'git commit mensaje conventional commits idioma generar claude lixbon', Page: GitPage },
-    { id: 'keys', label: 'Atajos de teclado', icon: IconKeyboard, keywords: 'atajos teclado keybindings combinacion', Page: Keybindings },
+    { id: 'keys', label: 'Atajos', icon: IconKeyboard, keywords: 'atajos teclado keybindings combinacion', Page: Keybindings },
+    { id: 'appearance', label: 'Apariencia', icon: IconAppearance, keywords: 'interfaz tamaño zoom letra tipografia tema oscuro claro sistema apariencia', Page: AppearancePage },
     { id: 'mascota', label: 'Mascota', icon: IconMascota, keywords: 'mascota gael leya pixel animacion kart latigo aviso flotante dormir', Page: MascotaPage },
   ] },
   { label: 'Sistema', items: [
@@ -56,6 +58,25 @@ export function SettingsPage() {
   const [version, setVersion] = useState('');
   const [thumb, setThumb] = useState(null);
   const itemRefs = useRef({});
+  const dialogRef = useRef(null);
+  const returnFocus = useRef(typeof document === 'undefined' ? null : document.activeElement);
+
+  useEffect(() => {
+    const focusable = () => [...(dialogRef.current?.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, a[href], [tabindex="0"]') || [])]
+      .filter(element => element.getClientRects().length && (!element.checkVisibility || element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })));
+    if (!dialogRef.current?.contains(document.activeElement)) focusable()[0]?.focus();
+    const onTab = event => {
+      if (event.key !== 'Tab' || document.querySelector('.confirm__overlay, .modal__overlay:not(.sm__overlay)')) return;
+      const elements = focusable();
+      if (!elements.length) { event.preventDefault(); return; }
+      const first = elements[0], last = elements[elements.length - 1];
+      if (!dialogRef.current?.contains(document.activeElement)) { event.preventDefault(); first.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', onTab);
+    return () => { window.removeEventListener('keydown', onTab); if (returnFocus.current?.isConnected) returnFocus.current.focus(); };
+  }, []);
 
   useEffect(() => { getAppVersion().then(setVersion).catch(() => {}); }, []);
   useEffect(() => {
@@ -83,7 +104,7 @@ export function SettingsPage() {
 
   return (
     <div className="modal__overlay sm__overlay" onPointerDown={(e) => { if (e.target === e.currentTarget) closePage(); }}>
-      <div className="sm" role="dialog" aria-modal="true" aria-label="Ajustes">
+      <div ref={dialogRef} className="sm" role="dialog" aria-modal="true" aria-label="Ajustes">
         <header className="sm__head">
           <h2 className="sm__title">Ajustes</h2>
           <div className="sm__fill" />

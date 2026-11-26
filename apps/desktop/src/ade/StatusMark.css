@@ -1,5 +1,5 @@
 .ade-mark, .ade-attn-mark { display: inline-flex; flex: none; vertical-align: middle; margin-right: 5px; }
-.ade-status--active { color: var(--ink-soft); }
+.ade-status--active { color: var(--info); }
 .ade-status--waiting, .ade-status--warn, .ade-attn-mark { color: var(--warn); }
 .ade-status--done, .ade-status--ok { color: var(--ok, var(--good)); }
 .ade-status--failed { color: var(--danger-ink, var(--danger)); }
