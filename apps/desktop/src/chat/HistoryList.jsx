@@ -1,3 +1,4 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // HistoryList.jsx — conversaciones del IDE agrupadas por fecha, con la que
 // está en curso arriba: buscar, abrir, renombrar, archivar y borrar.
 // Lo no archivado se borra solo tras 14 días sin actividad: Claude Code en cc_sessions,
@@ -195,6 +196,7 @@ export function HistoryList() {
 
   return (
     <div className="hist">
+      <details className="hist__tools"><summary><IconSearch size={14} />Buscar y filtrar</summary>
       <div className="hist__search">
         <div className="field">
           <IconSearch size={15} />
@@ -220,6 +222,7 @@ export function HistoryList() {
           );
         })}
       </div>
+      </details>
       {error && <span className="hist__error">{error}</span>}
 
       <div className="hist__list scroll">
@@ -247,21 +250,9 @@ export function HistoryList() {
                   />
                 ) : (
                   <button className="hist__btn" onClick={() => openItem(c)} title={c.title}>
-                    {(() => {
-                      const eng = c.live ? (open.find((o) => o.key === c.key)?.engine || 'lixbon') : engineKey(c);
-                      const Mark = engineOf(eng).Mark;
-                      const working = c.streaming && !c.waiting;
-                      return (
-                        <>
-                          {working && (eng === 'claude' ? <ClaudeMark size={12} className="claudemark--live" /> : <LogoMark size={12} motion="giro" />)}
-                          {c.waiting && <span className="dot dot--accent dot--pulse" title="Espera tu permiso" />}
-                          {c.live && !c.streaming && !c.waiting && <span className="dot dot--good" title="Terminó" />}
-                          {!working && (eng !== 'lixbon' || filter === 'all') && <span className="hist__mark" title={engineOf(eng).label}><Mark size={11} /></span>}
-                        </>
-                      );
-                    })()}
-                    <span className="hist__title">{c.title || 'Nueva conversación'}</span>
-                    <span className="hist__time">{c.waiting ? 'permiso' : c.streaming ? 'ahora' : c.live ? 'listo' : relTime(c.updated_at)}</span>
+                    <StatusIcon kind={c.waiting ? 'permission' : c.streaming ? 'working' : c.live ? 'done' : 'agent'} size={16} />
+                    <span className="hist__copy"><span className="hist__title">{c.title || 'Nueva conversación'}</span><span className="hist__subtitle">{c.waiting ? 'te pide permiso' : c.streaming ? 'trabajando' : c.live ? 'hecho' : relTime(c.updated_at)}</span></span>
+
                   </button>
                 )}
                 {!c.live && renamingId !== c.id && engineKey(c) !== 'codex' && (

@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // ChatMessage.jsx — una burbuja del chat (usuario / asistente / error).
 // Las filas de herramienta se agrupan aparte en ToolGroup (las llama ChatPanel).
 import { memo, useEffect, useState } from 'react';
@@ -388,19 +389,19 @@ export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
       <div className="msg msg--user">
         {message.context && (
           <span className="msg__ctx" title="Se adjuntó como contexto">
-            <IconFileCode size={12} />
+            <FileIcon nombre={message.context.name} size={16} />
             {message.context.name}
             {message.context.selection ? ' (selección)' : ''}
           </span>
         )}
         {docs.map((name, i) => (
           <span key={`d${i}`} className="msg__ctx" title="Documento adjunto">
-            <IconFileCode size={12} />
+            <FileIcon nombre={name} size={16} />
             {name}
           </span>
         ))}
         {message.mentions?.map((name, i) => (
-          <span key={`m${i}`} className="msg__ctx" title="Archivo mencionado">@{name}</span>
+          <span key={`m${i}`} className="msg__ctx" title="Archivo mencionado"><FileIcon nombre={name} size={16} />@{name}</span>
         ))}
         {message.images?.length > 0 && (
           <div className="msg__images">

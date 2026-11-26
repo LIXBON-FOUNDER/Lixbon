@@ -32,15 +32,15 @@
 
 .jpal__title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--text-input, 16px);
+  font-weight: var(--weight-title, 600);
   line-height: 1.35;
 }
 
 .jpal__help {
   margin: 4px 0 0;
   color: var(--ink-50);
-  font-size: 11px;
+  font-size: var(--text-meta, 11px);
   line-height: 1.45;
 }
 
@@ -55,7 +55,7 @@
   color: var(--ink-50);
   background: transparent;
   font: inherit;
-  font-size: 21px;
+  font-size: var(--text-input, 21px);
   line-height: 1;
   cursor: pointer;
 }
@@ -73,7 +73,7 @@
   color: var(--ink);
   background: var(--surface-1, var(--surface-2));
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-row, 14px);
 }
 
 .jpal__input:focus-visible,
@@ -101,8 +101,8 @@
   margin: 0;
   padding: 8px 10px 5px;
   color: var(--ink-50);
-  font-size: 10px;
-  font-weight: 650;
+  font-size: var(--text-meta, 10px);
+  font-weight: var(--weight-title, 650);
   letter-spacing: 0.07em;
   line-height: 1.3;
   text-transform: uppercase;
@@ -110,7 +110,7 @@
 
 .jpal__count {
   color: var(--ink-50);
-  font-size: 10px;
+  font-size: var(--text-meta, 10px);
   font-weight: 500;
   letter-spacing: 0;
 }
@@ -148,7 +148,7 @@
 .jpal__option-facts {
   overflow: hidden;
   color: var(--ink-50);
-  font-size: 10px;
+  font-size: var(--text-meta, 10px);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -156,7 +156,7 @@
 .jpal__option-label {
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--text-meta, 12px);
   font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -168,7 +168,7 @@
   overflow: hidden;
   color: var(--ink-50);
   font-family: var(--mono, ui-monospace, monospace);
-  font-size: 10px;
+  font-size: var(--text-meta, 10px);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -183,7 +183,7 @@
   border-radius: var(--radius, 8px);
   color: var(--warn);
   background: var(--warn-soft);
-  font-size: 11px;
+  font-size: var(--text-meta, 11px);
   line-height: 1.4;
 }
 
@@ -208,7 +208,7 @@
   padding: 9px 20px 11px;
   border-top: 1px solid rgba(var(--ink-rgb), 0.08);
   color: var(--ink-50);
-  font-size: 10px;
+  font-size: var(--text-meta, 10px);
 }
 
 .jpal__sr-only {

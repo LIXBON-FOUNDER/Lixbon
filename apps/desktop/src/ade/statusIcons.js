@@ -1,0 +1,2 @@
+export const attentionKind = (category) => ({ approval: 'permission', question: 'question', review_ready: 'review', environment_blocked: 'network', failed: 'failed', conflict: 'branch', risk: 'permission' })[category] || 'attention';
+export const executionKind = (status) => ({ running: 'working', starting: 'working', pending_approval: 'permission', awaiting_terminal_approval: 'permission', waiting: 'question', done: 'done', failed: 'failed', stopped: 'paused', exited: 'paused' })[status] || 'paused';

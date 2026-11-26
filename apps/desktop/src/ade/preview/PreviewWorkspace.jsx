@@ -12,11 +12,11 @@ import { PreviewComposer } from './PreviewComposer';
 
 // Cada fase tiene dueño: así se ve dónde entra una persona (los roles del equipo como compuertas).
 const STAGES = [
-  { label: 'Preparar', owner: 'coordinador' },
-  { label: 'Ejecutar', owner: 'agente' },
-  { label: 'Verificar', owner: 'pruebas' },
-  { label: 'Revisar', owner: 'tú' },
-  { label: 'Integrar', owner: 'tú' },
+  { label: 'Preparación' },
+  { label: 'Ejecución' },
+  { label: 'Verificación' },
+  { label: 'Revisión', owner: 'tú' },
+  { label: 'Integración', owner: 'tú' },
 ];
 
 function stageIndex(a) {
@@ -55,6 +55,7 @@ function Header({ a, task, project, siblings }) {
   const pick = (fn) => () => { setMenu(false); fn(); };
   return (
     <header className="pv-ws__head">
+      <div className="pv-ws__breadcrumb" title={task.objective}>{project.name}{task.run && <> / {task.run}</>}</div>
       <div className="pv-ws__titlerow">
         <h1 className="pv-ws__title">{task.title}</h1>
         <StatePill attempt={a} />
@@ -63,7 +64,7 @@ function Header({ a, task, project, siblings }) {
         {a.integrationStatus === 'pending' && <span className="pv-tag pv-tone-waiting">Integración pendiente</span>}
         <span className="panelhead__fill" />
         <button type="button" className="btn btn--accent" onClick={primary.run}><I n={primary.icon} size={14} />{primary.label}</button>
-        <button ref={ref} type="button" className="btn btn--ghost" onClick={() => setMenu((v) => !v)} aria-haspopup="menu" aria-expanded={menu}>Acciones <I n="down" size={12} /></button>
+        <button ref={ref} type="button" className="btn btn--ghost pv-ws__actions" onClick={() => setMenu((v) => !v)} aria-label="Acciones del intento" aria-haspopup="menu" aria-expanded={menu}>···</button>
         <Popover anchorRef={ref} open={menu} onClose={() => setMenu(false)} align="right">
           <div className="menu" role="menu">
             <button type="button" className="menu__item" role="menuitem" disabled={a.state === 'offline'} onClick={pick(() => (human ? s.setOverlay({ type: 'return', attemptId: a.id }) : s.takeOver(a.id)))}>
@@ -76,14 +77,8 @@ function Header({ a, task, project, siblings }) {
           </div>
         </Popover>
       </div>
-      <div className="pv-ws__lede">
-        <span>{project.name} · Task{task.run && <> · hija de «{task.run}»</>}</span>
-        <span className="pv-ws__objective" title={task.objective}>{task.objective}</span>
-      </div>
       <div className="pv-ws__attline">
         {siblings.length > 1 ? <AttemptStrip task={task} /> : <span className="pv-ws__one"><b>{attemptName(a)}</b><Agent attempt={a} /></span>}
-        <span className="panelhead__fill" />
-        <span className="pv-ws__host" title="Host que ejecuta"><I n="server" size={12} />{hostOf(a.host).name}</span>
         <button type="button" className="lk" aria-expanded={s.contextOpen} onClick={s.toggleContext}>Contexto <I n={s.contextOpen ? 'up' : 'down'} size={12} /></button>
       </div>
       {s.contextOpen && (
@@ -111,26 +106,24 @@ function Moment({ a }) {
   ].filter(Boolean);
   return (
     <section className={`pv-moment pv-tone-${copy.tone}`} aria-live="polite" aria-label={copy.title}>
-      <div className="pv-moment__row">
-        <Mark attempt={a} size={14} />
-        <b className="pv-moment__title">{copy.title}</b>
-        {copy.detail && <span className="pv-moment__detail">{copy.detail}</span>}
-        <span className="panelhead__fill" />
-        {facts.map((f) => <span key={f.label} className="pv-moment__fact"><b className="mono">{f.value}</b> {f.label}</span>)}
-      </div>
+      {blocked && <div className="pv-moment__row"><Mark attempt={a} size={14} /><b className="pv-moment__title">{copy.title}</b>{copy.detail && <span className="pv-moment__detail">{copy.detail}</span>}</div>}
       <ol className="pv-stages" aria-label="Ciclo de vida del Intento">
         {STAGES.map((st, i) => {
           const current = i === active;
           const done = i < active;
           return (
             <li key={st.label} className={`pv-stage${done ? ' is-done' : ''}${current ? ' is-current' : ''}${current && blocked ? ' is-blocked' : ''}`} aria-current={current ? 'step' : undefined}>
-              <span className="pv-stage__dot">{done ? <I n="check" size={10} /> : i + 1}</span>
               <span className="pv-stage__label">{st.label}</span>
-              <span className="pv-stage__owner">{st.owner}</span>
+              {st.owner && <span className="pv-stage__owner"> · {st.owner}</span>}
             </li>
           );
         })}
       </ol>
+      <div className="pv-workmetrics" aria-label="Métricas del intento">
+        {facts.map((f) => <span key={f.label}><b>{f.value}</b> {f.label}{f.label === 'archivos' && <> <span className="pv-good">+{a.add}</span> <span className="pv-bad">−{a.del}</span></>}</span>)}
+        <span><b>{money(a.cost)}</b> · {kTokens(a.tokens)} tokens</span>
+        <span><I n="server" size={13} />{hostOf(a.host).name} · {a.worktree ? 'en su propio worktree' : 'sin worktree'}</span>
+      </div>
     </section>
   );
 }
@@ -145,16 +138,14 @@ function AttemptStrip({ task }) {
         const n = attentionFor(s, x.id).length;
         return (
           <button key={x.id} type="button" role="tab" aria-selected={on} className={`pv-strip__t${on ? ' is-on' : ''}`} onClick={() => s.select(x.id)}>
-            <span className="pv-strip__l mono">{x.label}</span>
             <Agent attempt={x} detail={false} />
-            <Mark attempt={x} size={12} />
-            <span className="pv-strip__state">{stateLabel(x)}</span>
+            <span className="pv-strip__l mono" title={stateLabel(x)}>{x.label}</span>
             {n > 0 && <AttnFlag n={n} />}
             {s.choice[task.id] === x.id && <span className="pv-tag pv-tone-done">elegido</span>}
           </button>
         );
       })}
-      <button type="button" className="lk pv-strip__add" onClick={() => s.openFork(s.sel.attemptId)}><I n="plus" size={12} />Nuevo Intento</button>
+      <button type="button" className="lk pv-strip__add" onClick={() => s.openFork(s.sel.attemptId)}><I n="branch" size={14} />Nuevo intento</button>
     </div>
   );
 }
@@ -191,13 +182,11 @@ function Event({ e, a }) {
     return (
       <div className="pv-ev pv-ev--group">
         <button type="button" className="pv-ev__g" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-          <I n={open ? 'down' : 'right'} size={11} />
-          <I n={tools ? 'terminal' : 'filecode'} size={12} />
           <b>{tools ? e.title : `Editó ${e.files.length} archivos`}</b>
           {tools && !running && <span className={fails ? 'pv-bad' : 'pv-good'}>{fails ? `${fails} fallaron` : 'todo bien'}</span>}
           {running && <Mark kind="working" tone="active" size={12} />}
           {!tools && <><span className="pv-good mono">+{add}</span><span className="pv-bad mono">−{del}</span></>}
-          <span className="panelhead__fill" /><span className="pv-muted mono">{e.time}</span>
+          <I n={open ? 'down' : 'right'} size={11} /><span className="pv-ev__time pv-muted mono">{e.time}</span>
         </button>
         {open && (
           <ul className="pv-ev__list">
@@ -226,7 +215,7 @@ function ActivityTab({ a }) {
   const shown = live ? events : events.slice(0, upTo + 1);
   return (
     <div className="pv-activity">
-      <div className="pv-replay">
+      <details className="pv-replay-disclosure"><summary>Reproducir actividad</summary><div className="pv-replay">
         <I n="history" size={12} />
         <label className="pv-replay__label" htmlFor={`pv-replay-${a.id}`}>Reproducir</label>
         <input
@@ -245,7 +234,7 @@ function ActivityTab({ a }) {
           </>
         )}
       </div>
-      <div className="pv-activity__scroll scroll">
+      </details><div className="pv-activity__scroll scroll">
         {shown.map((e) => <Event key={e.id} e={e} a={a} />)}
         {live && a.state === 'working' && (
           <div className="pv-ev pv-ev--live"><Mark attempt={a} size={13} /><span>{a.phase === 'tool' ? `Ejecutando ${a.toolLabel || 'una orden'}` : a.phase === 'thinking' ? 'Pensando' : 'Escribiendo'}…</span><span className="pv-muted">{a.latest}</span></div>
@@ -348,8 +337,6 @@ export function PreviewWorkspace() {
           label="Detalle del Intento"
           options={[{ id: 'activity', label: 'Actividad' }, { id: 'changes', label: 'Cambios' }, { id: 'terminal', label: 'Terminal' }, { id: 'artifacts', label: 'Artefactos' }]}
         />
-        <span className="panelhead__fill" />
-        <Pulse a={a} />
       </div>
       <div className="pv-ws__body">
         {tab === 'activity' && <ActivityTab a={a} />}

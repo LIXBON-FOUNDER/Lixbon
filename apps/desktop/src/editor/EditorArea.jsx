@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // EditorArea.jsx — pestañas, ruta y editor del archivo activo.
 import { useEffect, useMemo, useState } from 'react';
 import { useFileViewStore } from '../store/fileViewStore';
@@ -86,7 +87,7 @@ function Tabs() {
             onAuxClick={(e) => { if (e.button === 1) closeTab(t.path); }}
             title={t.path}
           >
-            <span className="edtab__name">{t.name}</span>
+            <FileIcon nombre={t.path} size={16} /><span className="edtab__name">{t.name}</span>
             {byAgent && <span className="dot dot--accent dot--pulse" title="El agente editó este archivo" />}
             <button
               className={`edtab__close ${dirty ? 'is-dirty' : ''}`}

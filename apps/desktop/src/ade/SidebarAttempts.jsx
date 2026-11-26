@@ -4,6 +4,8 @@ import { COPY, attemptStatusInfo } from './adeLabels';
 import { attemptTime } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { validTaskV2 } from './coreModelContract';
+import { ProviderMark } from '../orch/agent/ProviderMark';
+import { providerName } from '../orch/agent/agentIdentity';
 
 // Sidebar adaptativo Project → Task → Attempt (LXO-120).
 //
@@ -89,10 +91,12 @@ function AttemptRow({ projectId, taskId, attempt, position, setSize }) {
       onClick={(event) => { event.stopPropagation(); activate(); }}
     >
       <span className="ps__line">
-        <AttemptChip attempt={attempt} />
-        <span className="ps__id mono">{attempt.id}</span>
+        <ProviderMark provider={attempt.provider} size={14} />
+        <span className="ps__name">{providerName(attempt.provider)}</span>
+        <span className="ps__attempt-number">{attempt.n}</span>
       </span>
-      <span className="ps__meta" id={metaId}><AttemptMeta attempt={attempt} /></span>
+      <span className="ps__attempt-state"><StatusText info={info} mark={false} /></span>
+      <span className="sr-only" id={metaId}>Intento {attempt.n}. {attempt.id}. <AttemptMeta attempt={attempt} /></span>
     </li>
   );
 }
