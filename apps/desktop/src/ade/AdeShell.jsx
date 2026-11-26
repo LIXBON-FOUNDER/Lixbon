@@ -1112,7 +1112,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
             </div>
             <div className="ade-view-panel" role="tabpanel" id={`${viewIds}-panel-map`} aria-labelledby={`${viewIds}-tab-map`} hidden={workspaceView !== 'map'}><CoreTaskMap key={selectedProjectId || 'none'} projectId={selectedProjectId} projectName={selectedProjectName} tasks={mapTaskDtos} summaryPartial={coreModel.vNext && (Boolean(mapAttemptSummaries.data?.next_cursor) || Boolean(mapAttemptSummaries.error))} status={projectTasks.status} error={projectTasks.error} onRetry={projectTasks.retry} hasMore={projectTaskContinuation.hasMore} onLoadMore={projectTaskContinuation.loadMore} onOpenTask={selectTask} onOpenAttempt={({taskId,attemptId})=>selectAttempt({projectId:selectedProjectId,taskId,attemptId})} active={workspaceActive && workspaceView === 'map'} /></div>
             {workspaceView === 'hosts' && <CoreHosts projectId={selectedProjectId} inventory={projectInventory.data} status={resourceInventoryStatus(projectInventory)} onRetry={projectInventory.retry} onOpenTask={selectTask} />}
-            {workspaceView === 'integrations' && <CoreIntegrations />}
+            {workspaceView === 'integrations' && <CoreIntegrations projectId={selectedProjectId} projectName={selectedProjectName} coreModel={coreModel} active={workspaceActive} onCreated={({projectId,taskId,attemptId})=>attemptId ? selectAttempt({projectId,taskId,attemptId}) : selectTask({projectId,taskId})} onCancel={()=>changeWorkspaceView('workspace')} />}
           </Panel>
 
           <RightDock

@@ -618,3 +618,34 @@
   [data-ui='ide'] .ade-real-inspector-tabs { display: grid; grid-template-columns: 1fr 1fr; overflow: visible; }
   [data-ui='ide'] .ade-real-inspector-tabs button { text-align: center; }
 }
+[data-ui='ide'] .ade-core-integrations { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 8px; padding: 0; min-height: 0; background: var(--surface-0); overflow: hidden; }
+[data-ui='ide'] .ade-core-integrations > aside, [data-ui='ide'] .ade-core-integrations > main { background: var(--surface-1); border-radius: 12px; min-width: 0; overflow: auto; }
+[data-ui='ide'] .ade-core-integrations > aside > header { padding: 0 var(--panel-text); }
+[data-ui='ide'] .ade-core-integrations > aside h1 { min-height: 48px; display: flex; align-items: center; font-size: 14px; }
+[data-ui='ide'] .ade-core-integrations > aside header p { font-size: 13px; line-height: 1.5; margin: 0; }
+[data-ui='ide'] .ade-core-integrations__list { margin: 16px var(--panel-box); gap: 2px; }
+[data-ui='ide'] .ade-core-integrations__list > button { background: transparent; padding: 10px 12px; gap: 10px; }
+[data-ui='ide'] .ade-core-integrations__list > button:hover { background: var(--surface-3); }
+[data-ui='ide'] .ade-core-integrations__list > button > svg { flex: none; }
+[data-ui='ide'] .ade-core-integrations > aside > .btn { margin: 0 var(--panel-box) 12px; padding: 0 12px; font-size: 13px; }
+[data-ui='ide'] .nat--page { width: min(600px, calc(100% - 56px)); margin: 36px auto; }
+[data-ui='ide'] .nat-page { display: flex; flex-direction: column; gap: 22px; }
+[data-ui='ide'] .nat-page > header p { margin: 0 0 4px; font-size: 13px; color: var(--ink-muted); }
+[data-ui='ide'] .nat-page > header h2 { margin: 0; font-family: var(--font-display); font-size: 28px; font-weight: 400; }
+[data-ui='ide'] .nat-page > .nat__form { padding: 0; background: transparent; gap: 22px; }
+[data-ui='ide'] .nat-page > footer .nat__actions { justify-content: flex-end; }
+[data-ui='ide'] .nat-page .nat__field > span { color: var(--ink-soft); font-size: 14px; font-weight: 400; }
+[data-ui='ide'] .nat-page .nat__field input, [data-ui='ide'] .nat-page .nat__field select, [data-ui='ide'] .nat-page .nat__field textarea { padding: 10px 12px; border-radius: 6px; background: var(--surface-3); border: 1px solid var(--surface-4); font-size: 14px; }
+[data-ui='ide'] .nat-page .provider-select.has-mark > select { padding-left: 38px; }
+[data-ui='ide'] .nat-page .nat__row { gap: 16px; }
+[data-ui='ide'] .nat-page .nat__modes input { width: auto; }
+[data-ui='ide'] .nat-page .nat__modes label { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; }
+[data-ui='ide'] .nat-page .nat__extra { font-size: 13px; color: var(--ink-muted); }
+[data-ui='ide'] .nat-page .nat__extra > summary { cursor: pointer; }
+[data-ui='ide'] .nat__host { min-height: 43px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; border-radius: 6px; background: var(--surface-3); color: var(--ink); font-size: 14px; }
+[data-ui='ide'] .nat__host > svg { flex: none; color: var(--ink-muted); }
+@media (max-width: 760px) {
+  [data-ui='ide'] .ade-core-integrations { grid-template-columns: 1fr; overflow: auto; }
+  [data-ui='ide'] .ade-core-integrations > aside, [data-ui='ide'] .ade-core-integrations > main { overflow: visible; }
+  [data-ui='ide'] .nat--page { width: calc(100% - 40px); margin: 24px auto; }
+}

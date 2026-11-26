@@ -2,6 +2,8 @@ import { useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Modal } from '../components/Modal';
 import { providerName } from '../orch/agent/agentIdentity';
+import { ProviderSelect } from '../components/ProviderSelect';
+import { StatusIcon } from '@lixbon/icons/status';
 import { ATTEMPT_PROFILES, createTaskOnly, createTaskWithAttempt, describeCommandError, newRequestId } from './attemptCommands';
 import { useProviderCapabilities } from './useProviderCapabilities';
 import './NewAttemptForm.css';
@@ -19,11 +21,17 @@ import './NewAttemptForm.css';
  */
 const startable = (provider) => provider?.matrix?.capabilities?.start?.state === 'available';
 
-export function NewAttemptForm({ projectId, projectName = null, coreModel, active = true, onCreated, triggerLabel = 'Nuevo intento' }) {
+function CreationSurface({ surface, title, subtitle, onClose, footer, children }) {
+  return surface === 'page'
+    ? <section className="nat-page"><header><p>{subtitle}</p><h2>{title}</h2></header>{children}<footer>{footer}</footer></section>
+    : createPortal(<Modal title={title} subtitle={subtitle} onClose={onClose} footer={footer}>{children}</Modal>, document.body);
+}
+
+export function NewAttemptForm({ projectId, projectName = null, coreModel, active = true, onCreated, onCancel, surface = 'dialog', triggerLabel = 'Nuevo intento' }) {
   const uid = useId();
   const enabled = Boolean(active && projectId && coreModel?.vNext);
   const { snapshot, unsupported, probing } = useProviderCapabilities({ enabled });
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(surface === 'page');
   const [mode, setMode] = useState('attempt');
   const [title, setTitle] = useState('');
   const [instructions, setInstructions] = useState('');
@@ -36,7 +44,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
   // Una clave por INTENCIÓN: reintentar tras un fallo de red devuelve la misma Task en vez de duplicarla.
   const requestId = useRef(null);
 
-  if (!enabled) return <button type="button" className="btn btn--ghost btn--sm" disabled title={!projectId ? 'Selecciona un proyecto primero' : 'El Core aún no permite crear tareas con intentos'}>{triggerLabel}</button>;
+  if (!enabled) return surface === 'page' ? <div className="ade-view-empty"><h2>Nuevo intento</h2><p>{!projectId ? 'Selecciona un proyecto primero' : 'El Core aún no permite crear tareas con intentos'}</p></div> : <button type="button" className="btn btn--ghost btn--sm" disabled title={!projectId ? 'Selecciona un proyecto primero' : 'El Core aún no permite crear tareas con intentos'}>{triggerLabel}</button>;
 
   const providers = (snapshot?.providers ?? []).filter(startable);
   const chosen = providers.some((p) => p.id === provider) ? provider : providers[0]?.id ?? '';
@@ -62,7 +70,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
       setInstructions('');
       setModel('');
       setEffort('');
-      setOpen(false);
+      setOpen(surface === 'page');
       onCreated?.({ projectId, taskId: created.task_id, attemptId: created.attempt_id ?? null, status: created.status });
     } catch (failure) {
       setError(describeCommandError(failure));
@@ -82,10 +90,10 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
   }
 
   return (
-    <section className="nat" aria-label="Nuevo intento" data-testid="new-attempt">
-      <button type="button" hidden={open} className="btn btn--ghost btn--sm" onClick={() => setOpen(true)} data-testid="new-attempt-open">{triggerLabel}</button>
+    <section className={`nat${surface === 'page' ? ' nat--page' : ''}`} aria-label="Nuevo intento" data-testid="new-attempt">
+      <button type="button" hidden={open || surface === 'page'} className="btn btn--ghost btn--sm" onClick={() => setOpen(true)} data-testid="new-attempt-open">{triggerLabel}</button>
       {open && (
-        createPortal(<Modal title="Nuevo intento" subtitle={projectName || projectId} onClose={() => { if (!busy) { setOpen(false); setError(null); requestId.current = null; } }} footer={<div className="nat__actions"><button type="button" className="btn btn--ghost btn--sm" onClick={() => { setOpen(false); setError(null); requestId.current = null; }} disabled={busy}>Cancelar</button><button type="submit" form={`${uid}-form`} className="btn btn--primary btn--sm" disabled={!ready} data-testid="new-attempt-submit">{busy ? 'Creando…' : taskOnly ? 'Crear tarea' : 'Crear intento'}</button></div>}>
+        <CreationSurface surface={surface} title="Nuevo intento" subtitle={projectName || projectId} onClose={() => { if (!busy) { setOpen(false); setError(null); requestId.current = null; onCancel?.(); } }} footer={<div className="nat__actions"><button type="button" className="btn btn--ghost btn--sm" onClick={() => { setOpen(false); setError(null); requestId.current = null; onCancel?.(); }} disabled={busy}>Cancelar</button><button type="submit" form={`${uid}-form`} className="btn btn--primary btn--sm" disabled={!ready} data-testid="new-attempt-submit">{busy ? 'Creando…' : taskOnly ? 'Crear tarea' : 'Crear intento'}</button></div>}>
         <form id={`${uid}-form`} className="nat__form" onSubmit={submit} data-testid="new-attempt-form">
           <details className="nat__extra"><summary>Opciones de creación</summary>
           <fieldset className="nat__field nat__modes" data-testid="new-attempt-modes">
@@ -117,17 +125,16 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
           <div className="nat__row">
             <label className="nat__field" htmlFor={`${uid}-provider`}>
               <span>Agente</span>
-              <select id={`${uid}-provider`} value={chosen} onChange={(e) => setProvider(e.target.value)} disabled={!providers.length} data-testid="new-attempt-provider">
-                {providers.map((p) => <option key={p.id} value={p.id}>{providerName(p.id)}</option>)}
-              </select>
+              <ProviderSelect id={`${uid}-provider`} providers={providers} value={chosen} onChange={(e) => setProvider(e.target.value)} disabled={!providers.length || busy} data-testid="new-attempt-provider" />
             </label>
+            <div className="nat__field"><span>Host</span><div className="nat__host" title="El Core crea el worktree en este equipo al aprobar el intento"><StatusIcon kind="monitor" size={16} /><span>Este equipo</span></div></div>
+          </div>
             <label className="nat__field" htmlFor={`${uid}-profile`}>
-              <span>Perfil de permisos</span>
+              <span>Autonomía</span>
               <select id={`${uid}-profile`} value={profile} onChange={(e) => setProfile(e.target.value)} data-testid="new-attempt-profile">
                 {ATTEMPT_PROFILES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
               </select>
             </label>
-          </div>
           <details className="nat__extra"><summary>Modelo y esfuerzo</summary><div className="nat__row">
             <label className="nat__field" htmlFor={`${uid}-model`}>
               <span>Modelo (opcional)</span>
@@ -149,7 +156,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
                 <li data-testid="new-attempt-preview-what">Crea la tarea «{title.trim() || '…'}» sin intento: no hay worktree ni proveedor y no se ejecuta nada.</li>
               ) : (
                 <>
-                  <li data-testid="new-attempt-preview-what">Crea la tarea «{title.trim() || '…'}» y su intento 1 con <span className="mono">{chosen || '…'}</span> · {profileLabel}{model.trim() ? ` · ${model.trim()}` : ''}{effort.trim() ? ` · ${effort.trim()}` : ''}.</li>
+                  <li data-testid="new-attempt-preview-what">Crea la tarea «{title.trim() || '…'}» y su intento 1 con <span>{chosen ? providerName(chosen) : '…'}</span> · {profileLabel}{model.trim() ? ` · ${model.trim()}` : ''}{effort.trim() ? ` · ${effort.trim()}` : ''}.</li>
                   <li data-testid="new-attempt-preview-approval">Nada se ejecuta todavía: el intento queda esperando tu aprobación.</li>
                   <li data-testid="new-attempt-preview-worktree">Al aprobarlo, el Core le dará un worktree nuevo y propio, en este equipo. Si prefieres reutilizar el de otro intento del Project, elígelo en el detalle del intento antes de aprobarlo.</li>
                 </>
@@ -165,7 +172,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
               )}
             </div>
           )}
-        </form></Modal>, document.body)
+        </form></CreationSurface>
       )}
     </section>
   );

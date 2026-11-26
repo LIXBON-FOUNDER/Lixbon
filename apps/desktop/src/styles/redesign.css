@@ -71,6 +71,20 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 .modelmenu__settings { display: flex; width: 100%; justify-content: space-between; padding: 10px 14px; font-size: 13px; }
 @keyframes modelmenu-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .modelmenu { animation: none; } }
+.modelmenu { background: var(--modelmenu-surface, var(--surface-3)); }
+html[data-ui='ide']:not([data-theme='light']) .modelmenu { --modelmenu-surface: #262626; --modelmenu-inset: #1E1E1E; }
+.modelmenu [role='menu'] { display: flex; flex-direction: column; gap: 6px; }
+.modelmenu__head { padding: 6px 14px 2px; }
+.modelmenu__group { display: flex; flex-direction: column; padding: 4px; border-radius: 9px; background: var(--modelmenu-inset, var(--surface-2)); }
+.modelmenu__item { padding: 8px 10px; }
+.modelmenu__item > svg, .modelchip > svg { flex: none; }
+.modelmenu__name { font-weight: 400; overflow-wrap: anywhere; }
+.modelmenu__description { line-height: 1.4; }
+.modelmenu__reason { padding: 6px 14px 2px; }
+.modelmenu__hint { margin: 2px 14px 4px; }
+.modelmenu__settings { background: var(--modelmenu-inset, var(--surface-2)); border-radius: 9px; }
+.modelchip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modelchip__level { flex: none; }
 
 [data-ui='ide'] .actline { width: fit-content; max-width: 100%; }
 [data-ui='ide'] .actline__meta { flex: none; }

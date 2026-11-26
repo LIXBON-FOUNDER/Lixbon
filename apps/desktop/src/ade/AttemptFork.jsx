@@ -7,6 +7,7 @@ import './NewAttemptForm.css';
 import { createPortal } from 'react-dom';
 import { Modal } from '../components/Modal';
 import { IconGitBranch } from '../components/Icons';
+import { ProviderSelect } from '../components/ProviderSelect';
 
 function ForkSurface({ compact, onClose, children }) {
   return compact ? createPortal(<Modal title="Nuevo intento" subtitle="Bifurcar el intento seleccionado" onClose={onClose}>{children}</Modal>, document.body) : children;
@@ -135,9 +136,7 @@ export function AttemptFork({ attempt, onForked, onOpenAttempt, active = true, c
           <div className="nat__row">
             <label className="nat__field" htmlFor={`${uid}-provider`}>
               <span>Proveedor</span>
-              <select id={`${uid}-provider`} value={chosen} onChange={(e) => { setProvider(e.target.value); touch(); }} disabled={!providers.length} data-testid="attempt-fork-provider">
-                {providers.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
-              </select>
+              <ProviderSelect id={`${uid}-provider`} providers={providers} value={chosen} onChange={(e) => { setProvider(e.target.value); touch(); }} disabled={!providers.length || busy} data-testid="attempt-fork-provider" />
             </label>
             <label className="nat__field" htmlFor={`${uid}-title`}>
               <span>Título (opcional)</span>
