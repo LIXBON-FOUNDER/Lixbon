@@ -5,6 +5,7 @@ import { useProviderCapabilities } from './useProviderCapabilities';
 import { ATTEMPT_PROFILES, describeCommandError, newRequestId } from './attemptCommands';
 import { ContextPackageResult } from './ContextPreview';
 import { openInAde } from './f6Navigation';
+import { ProviderSelect } from '../components/ProviderSelect';
 
 /** Both flows use a Core-verified package and an explicit recipient. Success never changes focus. */
 export function AttemptTransfer({ attempt, task, projectId, source: incomingSource, active = true }) {
@@ -73,7 +74,7 @@ export function AttemptTransfer({ attempt, task, projectId, source: incomingSour
       {source?.file && <p>Origen: {source.file}:{source.line ?? 1}{source.end_line ? `–${source.end_line}` : ''} · revisión {source.revision}</p>}
       {kind === 'delegate' && (attempt || task) && <label><input type="checkbox" checked={newTask} disabled={busy} onChange={(e) => { setNewTask(e.target.checked); touch(); }} /> Crear una Task nueva desde este origen</label>}
       <p>{kind === 'handoff' ? 'Continúa la misma Task en un Attempt nuevo. Se conserva el perfil; Core determina el worktree local. No se transfiere la sesión del proveedor.' : 'Crea una Task y Attempt nuevos, sujetos a aprobación. Core determina el worktree local.'}</p>
-      <label>TO · Proveedor <select aria-label="Proveedor receptor" value={provider} disabled={busy} onChange={(e) => { setProvider(e.target.value); touch(); }}><option value="">Elige un proveedor</option>{providers.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}</select></label>
+      <label>TO · Proveedor <ProviderSelect aria-label="Proveedor receptor" providers={providers} placeholder="Elige un proveedor" value={provider} disabled={busy} onChange={(e) => { setProvider(e.target.value); touch(); }} /></label>
       <label>Modelo opcional <input value={model} maxLength={200} disabled={busy} onChange={(e) => { setModel(e.target.value); touch(); }} /></label>
       {kind === 'delegate' && <label>Perfil <select value={profile} disabled={busy} onChange={(e) => { setProfile(e.target.value); touch(); }}>{ATTEMPT_PROFILES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>}
       <label>Encargo <textarea value={instruction} rows={3} maxLength={12000} disabled={busy} onChange={(e) => { setInstruction(e.target.value); touch(); }} /></label>

@@ -16,13 +16,16 @@ import { AttemptResume } from './AttemptResume';
 import { AttemptRetry } from './AttemptRetry';
 import { AttemptStop } from './AttemptStop';
 import { AttemptUsage } from './AttemptUsage';
-import { attemptDuration, formatUtc } from './attemptFormat';
+import { attemptDuration, formatDurationMs, formatUtc } from './attemptFormat';
 import { ATTEMPT_DETAIL_V2 } from './coreModelContract';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { PathText } from './PathText';
 import { AttemptOwnership } from './AttemptOwnership';
 import { AttemptTransfer } from './AttemptTransfer';
 import { useCoreQuery } from './useCoreQuery';
+import { formatCost, formatTokens } from './usageModel';
+import { evidenceForAttempt, knownEvidence } from './attemptEvidence';
+import { StatusIcon } from '@lixbon/icons/status';
 
 /**
  * LXO-122 · Detalle de UN Attempt (solo lectura), de `attempt_detail`. Nada se inventa: lo que el
@@ -47,7 +50,7 @@ function Row({ label, children }) {
   return (<><dt>{label}</dt><dd>{children}</dd></>);
 }
 
-export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true }) {
+export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true, requestedTab = null, onSnapshot, evidence = null }) {
   const enabled = Boolean(active && attemptId && coreModel?.vNext);
   // Mientras el intento está activo se relee deprisa: «Detener», la cola y los avisos dependen de verlo `running` a tiempo (con el sondeo
   // normal, de 15 s, un intento corto terminaba antes de pintarse como activo).
@@ -57,6 +60,16 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
   const liveStatus = state.data?.attempt?.status;
   useEffect(() => { setFast(ACTIVE_ATTEMPT_STATUSES.includes(liveStatus)); }, [liveStatus]);
   const attempt = state.data?.attempt ?? null;
+  useEffect(() => { onSnapshot?.(attempt?.task_id === taskId ? attempt : null); }, [attempt, taskId, onSnapshot]);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!active || !ACTIVE_ATTEMPT_STATUSES.includes(attempt?.status) || !Number.isSafeInteger(attempt?.started_at)) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active, attempt?.status, attempt?.started_at]);
+  const [detailTab, setDetailTab] = useState('activity');
+  useEffect(() => { if (requestedTab?.tab === 'changes') setDetailTab('changes'); }, [requestedTab]);
 
   let body;
   if (!coreModel?.vNext) {
@@ -80,9 +93,30 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
     const session = attempt.provider_session;
     const worktree = attempt.worktree;
     const review = attempt.review;
+    const runningDuration = ['running', 'starting'].includes(attempt.status) && Number.isSafeInteger(attempt.started_at) && attempt.started_at > 0 && now >= attempt.started_at
+      ? `${formatDurationMs(now - attempt.started_at)} en marcha` : null;
+    const usage = attempt.usage;
+    const pack = evidenceForAttempt(evidence, attempt.id, attempt.task_id);
+    const knownCount = field => knownEvidence(field) && Number.isSafeInteger(field.value) && field.value >= 0;
+    const tests = knownEvidence(pack?.tests) && typeof pack.tests.value === 'string' ? pack.tests.value : null;
+    const tokens = Number.isSafeInteger(usage?.input_tokens) && usage.input_tokens >= 0 && Number.isSafeInteger(usage?.output_tokens) && usage.output_tokens >= 0 && Number.isSafeInteger(usage.input_tokens + usage.output_tokens) ? usage.input_tokens + usage.output_tokens : null;
     const artifacts = Array.isArray(attempt.artifacts) ? attempt.artifacts : [];
     body = (
       <>
+        <header className={`ade-attempt-design-head${onSnapshot ? ' sr-only' : ''}`}><h2>Intento {attempt.n}</h2><span>{[attempt.provider, attempt.model].filter(Boolean).join(' · ')}</span><StatusText info={attemptStatusInfo(attempt.status)} /></header>
+        <div className="ade-attempt-metrics">
+          <span>{runningDuration || (duration === COPY.notAvailable ? COPY.durationUnavailable : `${duration} en total`)}</span>
+          <span>{knownCount(pack?.changes?.files) ? <><b>{pack.changes.files.value}</b> archivos</> : 'Archivos · No informado'}{knownCount(pack?.changes?.additions) && knownCount(pack?.changes?.deletions) && <> <em className="is-add">+{pack.changes.additions.value}</em> <em className="is-del">−{pack.changes.deletions.value}</em></>}</span>
+          <span>{tests ? `Pruebas · ${tests}` : 'Pruebas · No informado'}</span>
+          <span title={usage?.source === 'provider_declared' ? 'Declarado por el proveedor' : undefined}><b>{typeof usage?.cost_usd === 'number' && Number.isFinite(usage.cost_usd) && usage.cost_usd >= 0 ? formatCost(usage.cost_usd) : 'Coste no informado'}</b> · {tokens === null ? 'Tokens no informados' : `${formatTokens(tokens)} tokens de entrada y salida`}</span>
+        </div>
+        <p className="ade-attempt-hostline"><StatusIcon kind="server" size={14}/>{worktree?.machine || COPY.hostUnavailable}{worktree?.path ? ' · worktree' : ''}{worktree?.branch && <> · <span>{worktree.branch}</span></>}</p>
+        <nav className="ade-attempt-design-tabs" aria-label="Detalle del intento">{[['activity', 'Actividad'], ['changes', 'Cambios'], ['terminal', 'Terminal'], ['artifacts', 'Artefactos'], ['details', 'Acciones y detalles']].map(([id, label]) => <button type="button" key={id} aria-pressed={detailTab === id} className={detailTab === id ? 'is-active' : ''} onClick={() => setDetailTab(id)}>{label}</button>)}</nav>
+        {attempt.status === 'pending_approval' && <AttemptApproval attemptId={attempt.id} onDecided={state.retry} />}
+        {attempt.status === 'awaiting_terminal_approval' && <AttemptAnswer attemptId={attempt.id} onAnswered={state.retry} />}
+        <div hidden={detailTab !== 'activity'} className="ade-attempt-design-feed"><AttemptActivity attemptId={attempt.id} coreModel={coreModel} embedded active={active && detailTab === 'activity'} /></div>
+        {detailTab === 'terminal' && <p className="ade-attempt-design-empty">La terminal no está disponible para este intento.</p>}
+        <div hidden={detailTab !== 'details'}>
         {!detailV2 && (
           <p className="ade-notice ade-notice--warn" role="status" data-code="attempt_detail_v2_unsupported">{COPY.attemptDetailV2Unsupported}</p>
         )}
@@ -113,11 +147,9 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
         </dl>
 
         {/* LXO-141: la decisión de la persona sobre la aprobación inicial; solo mientras el Core la espera. */}
-        {attempt.status === 'pending_approval' && <AttemptApproval attemptId={attempt.id} onDecided={state.retry} />}
         {/* LXO-248: elegir ANTES de aprobar el worktree de otro intento (en serie, mismo proyecto). */}
         <AttemptShareWorktree attempt={attempt} onShared={state.retry} />
         {/* LXO-247: lo que el proveedor le pide a la persona (permiso o pregunta) mientras el intento espera; el Core lo entrega y reanuda. */}
-        {attempt.status === 'awaiting_terminal_approval' && <AttemptAnswer attemptId={attempt.id} onAnswered={state.retry} />}
         {/* Detener la ejecución en marcha (el Core no declara detenido a un Attempt cuyo proceso no pudo matar). */}
         <AttemptStop taskId={attempt.task_id} status={attempt.status} onStopped={state.retry} />
         {/* Reintentar un intento que terminó mal: un Attempt nuevo y limpio, que el Core lanza por su camino de siempre. */}
@@ -125,7 +157,6 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
         {/* Continuar la sesión del proveedor de un intento terminado con un mensaje nuevo (reanudación nativa). */}
         <AttemptResume attempt={attempt} onResumed={state.retry} />
         {/* Instrucciones para un intento ocupado (Queue explícito) y la cola pendiente, tal como la dice el Core. */}
-        <AttemptQueue attempt={attempt} />
         {/* De dónde salió el intento, los Forks que nacieron de él y la acción de bifurcar (abrir uno es siempre una elección explícita). */}
         <AttemptLineage attempt={attempt} onOpenAttempt={onOpenAttempt} active={active} />
 
@@ -157,7 +188,9 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
 
         <h4 className="ssec__label">Consumo declarado</h4>
         <AttemptUsage usage={attempt.usage} />
+        </div>
 
+        <div hidden={detailTab !== 'artifacts'}>
         <h4 className="ssec__label">Artefactos</h4>
         {artifacts.length ? (
           <ul className="ade-attempt__artifacts" data-testid="attempt-artifacts">
@@ -172,12 +205,14 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
             ))}
           </ul>
         ) : <p className="ade-missing">{COPY.noArtifacts}</p>}
+        </div>
 
+        <div hidden={detailTab !== 'changes'}>
         <h4 className="ssec__label">Cambios y revisión</h4>
         {/* LXO-155: la evidencia antes del diff, con su procedencia, y aceptar/rechazar sobre el HEAD exacto que se ve. */}
-        <AttemptProofPack attempt={attempt} onDecided={state.retry} active={active} />
+        <AttemptProofPack attempt={attempt} onDecided={state.retry} active={active && detailTab === 'changes'} />
         {/* LXO-156: integrar la revisión aceptada (fusionar o publicar un PR), con el destino a la vista. */}
-        <AttemptIntegration attempt={attempt} onDone={state.retry} active={active} />
+        <AttemptIntegration attempt={attempt} onDone={state.retry} active={active && detailTab === 'changes'} />
         <AttemptChanges taskId={attempt.task_id} status={attempt.status} worktree={worktree} onReviewed={state.retry} />
         {review ? (
           <dl data-testid="attempt-review">
@@ -186,10 +221,13 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
             <Row label="Frescura"><StatusText info={reviewFreshnessInfo(review)} mark={false} /></Row>
           </dl>
         ) : <p className="ade-missing">{COPY.noReview}</p>}
+        </div>
 
+        <div hidden={detailTab !== 'details'}>
         {/* Autonomía de ESTE intento (LXO-210): cerrada hasta que se pide. */}
         <AutonomyEditor attemptId={attempt.id} />
-        <AttemptActivity attemptId={attempt.id} coreModel={coreModel} active={active} />
+        </div>
+        <AttemptQueue attempt={attempt} active={active} />
       </>
     );
   } else if (state.error) {
@@ -199,7 +237,7 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
   }
   return (
     <section className="ade-attempt" aria-label={COPY.attemptDetail} data-testid="attempt-detail">
-      <h3 className="ssec__label">{COPY.attemptDetail}</h3>
+      {!attempt && <h3 className="ssec__label">{COPY.attemptDetail}</h3>}
       {body}
     </section>
   );

@@ -1,10 +1,15 @@
-import { useId } from 'react';
+import { FileIcon } from '@lixbon/icons/file-icons';
+import { useEffect, useId } from 'react';
 import { attemptStatusInfo } from './adeLabels';
-import { formatDurationMs } from './attemptFormat';
+import { attemptLetter, formatDurationMs } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { Mark, PROVENANCE_VIEW } from './ProvenanceMark';
 import { useCoreQuery } from './useCoreQuery';
 import './AttemptCompare.css';
+import { ProviderMark } from '../orch/agent/ProviderMark';
+import { providerName } from '../orch/agent/agentIdentity';
+import { formatCost } from './usageModel';
+import { knownEvidence } from './attemptEvidence';
 
 /**
  * LXO-154 · Comparar 2–4 Attempts con la evidencia estructurada del Core (`attempt_compare`). SOLO LECTURA: no puntúa, no elige ganador, no
@@ -38,6 +43,30 @@ function selectionText(s) {
   return `${parts.join(' · ')}${s.external ? ' · externo' : ''}`;
 }
 
+function ComparisonCard({ attempt, onOpenAttempt, active }) {
+    // La comparación no incluye consumo. Se consulta el detalle del MISMO intento;
+    // nunca se usa el coste de la Task ni se reparte entre agentes.
+    const detail = useCoreQuery('attempt_detail', { attempt_id: attempt.attempt_id }, { enabled: active });
+    const snapshot = ['ready', 'refreshing'].includes(detail.status) && detail.data?.attempt?.id === attempt.attempt_id && detail.data.attempt.task_id === attempt.task_id ? detail.data.attempt : null;
+    const usage = snapshot?.usage;
+    const cost = typeof usage?.cost_usd === 'number' && Number.isFinite(usage.cost_usd) && usage.cost_usd >= 0 ? formatCost(usage.cost_usd) : null;
+    const selection = attempt.selection.provenance !== 'unknown' ? attempt.selection.value : null;
+    return <article className="cmp-design-card" key={attempt.attempt_id}>
+      <header>{selection && <ProviderMark provider={selection.provider} size={16} />}<h4>{selection ? providerName(selection.provider) : 'Agente no informado'} <span>{attemptLetter(attempt.n)}</span></h4>{attempt.status.provenance !== 'unknown' && <StatusText info={attemptStatusInfo(attempt.status.value.status)} />}</header>
+      <dl>
+        <dt>Pruebas</dt><dd>{attempt.tests.provenance === 'unknown' ? 'No informado' : <>{String(attempt.tests.value)} <Mark provenance={attempt.tests.provenance} /></>}</dd>
+        <dt>Cambios</dt><dd>{knownEvidence(attempt.changes.files) ? <><b>{attempt.changes.files.value} {attempt.changes.files.value === 1 ? 'archivo' : 'archivos'}</b>{knownEvidence(attempt.changes.additions) && knownEvidence(attempt.changes.deletions) && <span className="cmp-design-diff"><em className="is-add">+{attempt.changes.additions.value}</em> <em className="is-del">−{attempt.changes.deletions.value}</em></span>}</> : 'No informado'}</dd>
+        <dt>Coste</dt><dd title={cost ? 'Consumo declarado por el proveedor para este intento' : undefined}>{cost || 'No informado'}<span className="cmp-design-duration"> · {knownEvidence(attempt.timing) && Number.isSafeInteger(attempt.timing.value.duration_ms) ? formatDurationMs(attempt.timing.value.duration_ms) : 'Tiempo no informado'}</span></dd>
+      </dl>
+      <p className="cmp-design-summary">{attempt.summary.provenance === 'unknown' ? 'Resumen no informado.' : <>{attempt.summary.value}{attempt.summary.provenance === 'agent_reported' && <small>Lo dice el agente</small>}</>}</p>
+      {onOpenAttempt && <button type="button" className="btn btn--ghost" onClick={() => onOpenAttempt({taskId: attempt.task_id, attemptId: attempt.attempt_id})} title={`Abrir el intento ${attempt.n} para revisar e integrar`}>Elegir {attemptLetter(attempt.n)}</button>}
+    </article>;
+}
+
+function ComparisonCards({ attempts, onOpenAttempt, active }) {
+  return <div className="cmp-design-cards">{attempts.map(attempt => <ComparisonCard key={attempt.attempt_id} attempt={attempt} onOpenAttempt={onOpenAttempt} active={active} />)}</div>;
+}
+
 function Files({ changes }) {
   const { files, additions, deletions } = changes;
   return (
@@ -49,7 +78,7 @@ function Files({ changes }) {
           <summary>Ver archivos</summary>
           <ul className="cmp-files">
             {changes.list.map((f) => (
-              <li key={f.path}><code className="mono">{f.path}</code>{f.additions === null ? ' · binario' : <span className="cmp-diffstat"> +{f.additions} −{f.deletions}</span>}</li>
+              <li key={f.path}><FileIcon nombre={f.path} size={16} /><code className="mono">{f.path}</code>{f.additions === null ? ' · binario' : <span className="cmp-diffstat"> +{f.additions} −{f.deletions}</span>}</li>
             ))}
           </ul>
           {changes.truncated && <p className="cmp-note">Se muestran {changes.list.length} de {changes.total_files} archivos.</p>}
@@ -115,7 +144,7 @@ function Overlaps({ overlaps }) {
         : (
           <>
             <ul className="cmp-files">
-              {overlaps.items.map((o) => <li key={o.path}><code className="mono">{o.path}</code> · {o.attempt_ids.join(', ')}</li>)}
+              {overlaps.items.map((o) => <li key={o.path}><FileIcon nombre={o.path} size={16} /><code className="mono">{o.path}</code> · {o.attempt_ids.join(', ')}</li>)}
             </ul>
             {overlaps.total > overlaps.items.length && <p className="cmp-note">Se muestran {overlaps.items.length} de {overlaps.total} solapes.</p>}
           </>
@@ -125,11 +154,12 @@ function Overlaps({ overlaps }) {
   );
 }
 
-export function AttemptCompare({ attemptIds, onOpenAttempt, onClose, active = true }) {
+export function AttemptCompare({ attemptIds, onOpenAttempt, onClose, active = true, onComparisonChange }) {
   const uid = useId();
   const enabled = Boolean(active && Array.isArray(attemptIds) && attemptIds.length >= 2);
   const state = useCoreQuery('attempt_compare', { attempt_ids: attemptIds }, { enabled });
   const response = state.data ?? null;
+  useEffect(() => { onComparisonChange?.(response); return () => onComparisonChange?.(null); }, [response, onComparisonChange]);
   const count = attemptIds?.length ?? 0;
 
   return (
@@ -140,7 +170,11 @@ export function AttemptCompare({ attemptIds, onOpenAttempt, onClose, active = tr
       </div>
       {response ? (
         <>
-          <p className="cmp-note" data-testid="cmp-relation">{RELATION_TEXT[response.relation.kind]} Es solo una comparación: no cambia nada ni elige un ganador.</p>
+          <p className="cmp-note" data-testid="cmp-relation">{RELATION_TEXT[response.relation.kind]}</p>
+          {state.error && <CoreModelNotice error={state.error} onRetry={state.retry} />}
+          <ComparisonCards attempts={response.attempts} onOpenAttempt={onOpenAttempt} active={enabled} />
+          <p className="cmp-design-suggestion">Sugerencia: no informada. Abre un intento para revisar su evidencia antes de integrarlo.</p>
+          <details className="cmp-design-evidence"><summary>Procedencia y comparación completa</summary>
           <ul className="cmp-legend" aria-label="Cómo se sabe cada dato">
             {Object.entries(PROVENANCE_VIEW).map(([key, view]) => (
               <li key={key} className={`cmp-prov cmp-prov--${key}`}><span aria-hidden="true">{view.glyph}</span> {view.label}</li>
@@ -181,6 +215,7 @@ export function AttemptCompare({ attemptIds, onOpenAttempt, onClose, active = tr
             </table>
           </div>
           <Overlaps overlaps={response.overlaps} />
+          </details>
         </>
       ) : state.error ? (
         <CoreModelNotice error={state.error} onRetry={state.retry} />

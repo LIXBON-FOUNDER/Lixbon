@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { approveAttempt, describeCommandError, rejectAttempt } from './attemptCommands';
+import { StatusIcon } from '@lixbon/icons/status';
 
 /**
  * LXO-141 · La decisión de la persona sobre la aprobación inicial de un Attempt `pending_approval`. Solo aparece en ese estado.
@@ -40,7 +41,7 @@ export function AttemptApproval({ attemptId, onDecided }) {
 
   return (
     <div className="nat-approval" role="group" aria-label="Aprobación del intento" data-testid="attempt-approval">
-      <p className="nat__hint">Este intento espera tu aprobación para ejecutarse.</p>
+      <p className="nat-approval__title"><StatusIcon kind="permission" size={16} />Este intento espera tu aprobación para ejecutarse.</p>
       {outcome ? (
         <p role="status" data-testid="attempt-approval-outcome">{outcome}</p>
       ) : (

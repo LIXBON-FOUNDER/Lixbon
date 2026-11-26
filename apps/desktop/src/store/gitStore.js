@@ -15,6 +15,7 @@ import { useOutputStore } from './outputStore';
 // Cada cuánto se consulta al remoto si hay commits nuevos.
 const AUTO_FETCH_MS = 3 * 60 * 1000;
 let autoFetchTimer = null;
+let refreshEpoch = 0;
 
 /** Des-entrecomilla una ruta de porcelain: git envuelve en "…" las rutas con
     espacios/caracteres especiales y escapa en estilo C, con los bytes UTF-8
@@ -83,6 +84,8 @@ function parseStatus(stdout) {
 }
 
 export const useGitStore = create((set, get) => ({
+  snapshotRoot: null,
+  snapshotPrefix: null,
   isRepo: null, // null = sin comprobar
   branch: '',
   changes: [],
@@ -102,12 +105,16 @@ export const useGitStore = create((set, get) => ({
   setMessage: (message) => set({ message }),
 
   refresh: async () => {
-    set({ loading: true, error: '' });
+    const root = useAppStore.getState().workspaceRoot;
+    const epoch = ++refreshEpoch;
+    const current = () => epoch === refreshEpoch && useAppStore.getState().workspaceRoot === root;
+    set({ loading: true, error: '', ...(get().snapshotRoot !== root && { snapshotRoot: null, snapshotPrefix: null }) });
     try {
       const status = await gitRun(['status', '--porcelain=v1']);
+      if (!current()) return;
       if (status.code !== 0) {
         const notRepo = /not a git repository/i.test(status.stderr);
-        set({ isRepo: !notRepo, changes: [], branch: '', hasRemote: false, remoteUrl: '',
+        set({ snapshotRoot: root, snapshotPrefix: null, isRepo: !notRepo, changes: [], branch: '', hasRemote: false, remoteUrl: '',
               ahead: 0, behind: 0, loading: false,
               error: notRepo ? '' : status.stderr.trim() });
         return;
@@ -116,7 +123,7 @@ export const useGitStore = create((set, get) => ({
       // lo que la más lenta, no la suma (se nota en repos grandes).
       // `branch --show-current` da el nombre incluso sin commits (HEAD naciente),
       // donde `rev-parse --abbrev-ref HEAD` falla y dejaba un "(sin commits)".
-      const [branch, remotes, counts, originUrl, numWt, numIdx] = await Promise.all([
+      const [branch, remotes, counts, originUrl, numWt, numIdx, prefix] = await Promise.all([
         gitRun(['branch', '--show-current']),
         gitRun(['remote']),
         // Cuánto nos separa del upstream. Falla (y da 0/0) si la rama no tiene
@@ -125,7 +132,9 @@ export const useGitStore = create((set, get) => ({
         gitRun(['remote', 'get-url', 'origin']),
         gitRun(['diff', '--numstat']),
         gitRun(['diff', '--cached', '--numstat']),
+        gitRun(['rev-parse', '--show-prefix']),
       ]);
+      if (!current()) return;
       const name = branch.code === 0 ? branch.stdout.trim() : '';
       const hasRemote = remotes.code === 0 && !!remotes.stdout.trim();
 
@@ -138,6 +147,8 @@ export const useGitStore = create((set, get) => ({
       }
 
       set({
+        snapshotRoot: root,
+        snapshotPrefix: prefix.code === 0 ? prefix.stdout.trim() : null,
         isRepo: true,
         branch: name || '(HEAD suelto)',
         changes: parseStatus(status.stdout),
@@ -150,7 +161,7 @@ export const useGitStore = create((set, get) => ({
         loading: false,
       });
     } catch (e) {
-      set({ loading: false, error: String(e), isRepo: false });
+      if (current()) set({ snapshotRoot: null, snapshotPrefix: null, loading: false, error: String(e), isRepo: false });
     }
   },
 

@@ -4,6 +4,14 @@ import { statusBadges, sizeEstimate } from './contextPreviewModel';
 import { queryAdeCore } from './coreQueries';
 import { useProviderCapabilities } from './useProviderCapabilities';
 import './NewAttemptForm.css';
+import { createPortal } from 'react-dom';
+import { Modal } from '../components/Modal';
+import { IconGitBranch } from '../components/Icons';
+import { ProviderSelect } from '../components/ProviderSelect';
+
+function ForkSurface({ compact, onClose, children }) {
+  return compact ? createPortal(<Modal title="Nuevo intento" subtitle="Bifurcar el intento seleccionado" onClose={onClose}>{children}</Modal>, document.body) : children;
+}
 
 /**
  * LXO-153 · Fork de un intento: crea una ejecución NUEVA a partir de éste, sin tocarlo, y la deja pendiente de tu aprobación.
@@ -26,7 +34,7 @@ export const packageIsFromAttempt = (response, attempt) => response?.status === 
   && response.package?.source?.attempt_id === attempt.id
   && response.package?.source?.task_id === attempt.task_id;
 
-export function AttemptFork({ attempt, onForked, onOpenAttempt, active = true }) {
+export function AttemptFork({ attempt, onForked, onOpenAttempt, active = true, compact = false }) {
   const uid = useId();
   const [open, setOpen] = useState(false);
   const { snapshot, unsupported, probing } = useProviderCapabilities({ enabled: Boolean(active && open) });
@@ -105,7 +113,7 @@ export function AttemptFork({ attempt, onForked, onOpenAttempt, active = true })
   else if (!providers.length) note = probing ? 'El Core está comprobando los proveedores…' : 'Ningún proveedor puede arrancar un intento ahora mismo; mira «Proveedores» más abajo.';
 
   return (
-    <section className="nat nat-fork" aria-label="Bifurcar el intento" data-testid="attempt-fork">
+    <section className={`nat nat-fork${compact ? ' nat-fork--compact' : ''}`} aria-label="Bifurcar el intento" data-testid="attempt-fork">
       {outcome && (
         <p role="status" data-testid="attempt-fork-outcome">
           {outcome.text}
@@ -116,8 +124,9 @@ export function AttemptFork({ attempt, onForked, onOpenAttempt, active = true })
         </p>
       )}
       {!open ? (
-        <button type="button" className="btn btn--ghost btn--sm" onClick={() => setOpen(true)} data-testid="attempt-fork-open">Bifurcar…</button>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={() => setOpen(true)} data-testid="attempt-fork-open">{compact && <IconGitBranch size={16} />}{compact ? 'Nuevo intento' : 'Bifurcar…'}</button>
       ) : (
+        <ForkSurface compact={compact} onClose={() => { if (!busy) { setOpen(false); setError(null); } }}>
         <form className="nat__form" onSubmit={submit} data-testid="attempt-fork-form">
           <h3 className="ssec__label">Bifurcar este intento</h3>
           <p className="nat__hint" data-testid="attempt-fork-source">
@@ -127,9 +136,7 @@ export function AttemptFork({ attempt, onForked, onOpenAttempt, active = true })
           <div className="nat__row">
             <label className="nat__field" htmlFor={`${uid}-provider`}>
               <span>Proveedor</span>
-              <select id={`${uid}-provider`} value={chosen} onChange={(e) => { setProvider(e.target.value); touch(); }} disabled={!providers.length} data-testid="attempt-fork-provider">
-                {providers.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
-              </select>
+              <ProviderSelect id={`${uid}-provider`} providers={providers} value={chosen} onChange={(e) => { setProvider(e.target.value); touch(); }} disabled={!providers.length || busy} data-testid="attempt-fork-provider" />
             </label>
             <label className="nat__field" htmlFor={`${uid}-title`}>
               <span>Título (opcional)</span>
@@ -193,6 +200,7 @@ export function AttemptFork({ attempt, onForked, onOpenAttempt, active = true })
             <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => { setOpen(false); setError(null); }}>Cancelar</button>
           </div>
         </form>
+        </ForkSurface>
       )}
     </section>
   );

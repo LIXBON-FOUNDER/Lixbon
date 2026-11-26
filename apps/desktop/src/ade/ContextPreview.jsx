@@ -78,6 +78,7 @@ function Rejected({ response }) {
 }
 
 export function ContextPackageResult({ response }) {
+  const uid = useId();
   const { package: pkg, summary } = response;
   const size = sizeEstimate(summary);
   const sections = describeSections(pkg, summary);
@@ -94,8 +95,8 @@ export function ContextPackageResult({ response }) {
     <div className="cp-result" data-testid="context-preview-valid" data-completeness={summary.completeness}>
       <Badges response={response} />
 
-      <section aria-labelledby="cp-verif">
-        <h4 id="cp-verif" className="ssec__label">Verificación</h4>
+      <section aria-labelledby={`${uid}-verif`}>
+        <h4 id={`${uid}-verif`} className="ssec__label">Verificación</h4>
         <ul className="cp-list" data-testid="context-preview-verification">
           <li><span aria-hidden="true">✓</span> <strong>Identidad verificada.</strong> El contenido coincide con su hash <code className="mono">{response.package_id}</code>.</li>
           <li><span aria-hidden="true">✓</span> <strong>Sin credenciales.</strong> No se encontró nada con forma de secreto.</li>
@@ -103,8 +104,8 @@ export function ContextPackageResult({ response }) {
         </ul>
       </section>
 
-      <section aria-labelledby="cp-size">
-        <h4 id="cp-size" className="ssec__label">Tamaño</h4>
+      <section aria-labelledby={`${uid}-size`}>
+        <h4 id={`${uid}-size`} className="ssec__label">Tamaño</h4>
         <p data-testid="context-preview-size">
           El paquete pesa <strong>{size.package}</strong> (≈ {size.approxTokens} tokens, estimación gruesa) y {attachments.length
             ? <>sus adjuntos suman <strong>{size.attachments}</strong>, que no entran en el mensaje.</>
@@ -112,8 +113,8 @@ export function ContextPackageResult({ response }) {
         </p>
       </section>
 
-      <section aria-labelledby="cp-source">
-        <h4 id="cp-source" className="ssec__label">Origen</h4>
+      <section aria-labelledby={`${uid}-source`}>
+        <h4 id={`${uid}-source`} className="ssec__label">Origen</h4>
         <dl data-testid="context-preview-source">
           <Row label="Proyecto"><span className="mono">{pkg.source.project_id}</span></Row>
           <Row label="Task"><span className="mono">{pkg.source.task_id}</span></Row>
@@ -126,8 +127,8 @@ export function ContextPackageResult({ response }) {
         <p className="cp-note">El origen lo fijó el Core al crear el paquete: no se puede editar. La sesión y el host son huellas, no identificadores.</p>
       </section>
 
-      <section aria-labelledby="cp-included">
-        <h4 id="cp-included" className="ssec__label">Qué trae y qué no</h4>
+      <section aria-labelledby={`${uid}-included`}>
+        <h4 id={`${uid}-included`} className="ssec__label">Qué trae y qué no</h4>
         <ul className="cp-list" data-testid="context-preview-sections">
           {sections.map((s) => (
             <li key={s.id} data-section={s.id} data-state={s.state}>
@@ -137,8 +138,8 @@ export function ContextPackageResult({ response }) {
         </ul>
       </section>
 
-      <section aria-labelledby="cp-text">
-        <h4 id="cp-text" className="ssec__label">Objetivo, decisiones y restricciones</h4>
+      <section aria-labelledby={`${uid}-text`}>
+        <h4 id={`${uid}-text`} className="ssec__label">Objetivo, decisiones y restricciones</h4>
         <dl>
           <Row label="Objetivo"><span data-testid="context-preview-objective"><Redacted text={pkg.objective} /></span></Row>
           <Row label="Resumen del hilo">{pkg.thread_summary ? <Redacted text={pkg.thread_summary} /> : <span className="ade-missing">ausente</span>}</Row>
@@ -149,8 +150,8 @@ export function ContextPackageResult({ response }) {
         {pkg.constraints.length ? <ul className="cp-list">{pkg.constraints.map((c, i) => <li key={i}><Redacted text={c} /></li>)}</ul> : <p className="ade-missing">ninguna</p>}
       </section>
 
-      <section aria-labelledby="cp-rev">
-        <h4 id="cp-rev" className="ssec__label">Revisión de código</h4>
+      <section aria-labelledby={`${uid}-rev`}>
+        <h4 id={`${uid}-rev`} className="ssec__label">Revisión de código</h4>
         {rev ? (
           <>
             <dl data-testid="context-preview-revision">
@@ -170,8 +171,8 @@ export function ContextPackageResult({ response }) {
         ) : <p className="ade-missing" data-testid="context-preview-no-revision">Sin evidencia de código: {pkg.revision_absent_reason || 'el paquete no dice por qué'}.</p>}
       </section>
 
-      <section aria-labelledby="cp-unc">
-        <h4 id="cp-unc" className="ssec__label">Cambios sin commit</h4>
+      <section aria-labelledby={`${uid}-unc`}>
+        <h4 id={`${uid}-unc`} className="ssec__label">Cambios sin commit</h4>
         {unc && (unc.staged_patch || unc.unstaged_patch || (unc.untracked ?? []).length) ? (
           <>
             <dl>
@@ -187,16 +188,16 @@ export function ContextPackageResult({ response }) {
         ) : <p className="ade-missing">El worktree no tenía cambios sin commit.</p>}
       </section>
 
-      <section aria-labelledby="cp-tests">
-        <h4 id="cp-tests" className="ssec__label">Pruebas y artefactos</h4>
+      <section aria-labelledby={`${uid}-tests`}>
+        <h4 id={`${uid}-tests`} className="ssec__label">Pruebas y artefactos</h4>
         {tests ? <p data-testid="context-preview-tests"><code>{tests.command}</code> · pasan {tests.passed} · fallan {tests.failed} · ignoradas {tests.ignored}</p> : <p className="ade-missing">Sin resultado de pruebas.</p>}
         {artifacts.length ? (
           <ul className="cp-list" aria-label="Artefactos">{artifacts.map((a, i) => <li key={i}>{a.kind}: <code className="mono">{a.uri}</code>{Number.isSafeInteger(a.bytes) ? ` · ${formatBytes(a.bytes)}` : ''}</li>)}</ul>
         ) : <p className="ade-missing">Sin artefactos.</p>}
       </section>
 
-      <section aria-labelledby="cp-att">
-        <h4 id="cp-att" className="ssec__label">Adjuntos</h4>
+      <section aria-labelledby={`${uid}-att`}>
+        <h4 id={`${uid}-att`} className="ssec__label">Adjuntos</h4>
         {attachments.length ? (
           <ul className="cp-list" aria-label="Adjuntos" data-testid="context-preview-attachments">
             {attachments.map((a) => (
@@ -210,8 +211,8 @@ export function ContextPackageResult({ response }) {
         ) : <p className="ade-missing">Sin adjuntos.</p>}
       </section>
 
-      <section aria-labelledby="cp-red">
-        <h4 id="cp-red" className="ssec__label">Redacción y recortes</h4>
+      <section aria-labelledby={`${uid}-red`}>
+        <h4 id={`${uid}-red`} className="ssec__label">Redacción y recortes</h4>
         <p data-testid="context-preview-redactions">
           {pkg.redactions > 0
             ? <><strong>{pkg.redactions}</strong> {pkg.redactions === 1 ? 'valor se ocultó' : 'valores se ocultaron'} al crear el paquete. No hay forma de verlos desde aquí.</>

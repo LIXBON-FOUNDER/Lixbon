@@ -1,3 +1,4 @@
+import { extensionDeArchivo } from '@lixbon/icons/file-icons/resolver';
 // languages.js — lenguaje de CodeMirror por extensión. Se cargan bajo demanda
 // para no meter todos los parsers en el arranque.
 const LOADERS = {
@@ -28,7 +29,7 @@ const LABELS = {
   toml: 'TOML', sh: 'Shell', go: 'Go', java: 'Java', c: 'C', cpp: 'C++', h: 'C',
 };
 
-export const extOf = (path) => (path.split(/[\\/]/).pop().split('.').slice(1).pop() || '').toLowerCase();
+export const extOf = extensionDeArchivo;
 
 export function loadLanguage(path) {
   const loader = LOADERS[extOf(path)];
