@@ -3,7 +3,7 @@ import { FileIcon } from '@lixbon/icons/file-icons';
 // Clic en un archivo → se abre en una pestaña del editor. Clic
 // derecho → menú contextual (nuevo, renombrar, duplicar, copiar ruta, revelar,
 // eliminar). La carpeta raíz vive en appStore.workspaceRoot (la fija openWorkspace).
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ask } from '@tauri-apps/plugin-dialog';
 import {
   readDir, createNewEntry, renameEntry, deleteEntry, duplicateEntry,
@@ -11,6 +11,8 @@ import {
 } from '../../lib/tauri';
 import { useFileViewStore } from '../../store/fileViewStore';
 import { useAppStore } from '../../store/appStore';
+import { useGitStore } from '../../store/gitStore';
+import { useProblemsStore } from '../../store/problemsStore';
 import {
   IconFolder,
   IconFolderOpen,
@@ -31,6 +33,23 @@ export function FileTree() {
   const { peek, remap, clearUnder, peekedPath: activePath } = useFileViewStore();
   const rootPath = useAppStore((s) => s.workspaceRoot);
   const openWorkspace = useAppStore((s) => s.openWorkspace);
+  const changes = useGitStore(state => state.snapshotRoot === rootPath ? state.changes : null);
+  const prefix = useGitStore(state => state.snapshotRoot === rootPath ? state.snapshotPrefix : null);
+  const problems = useProblemsStore(state => state.problems);
+  const changeByPath = useMemo(() => new Map((prefix === null ? [] : changes || []).filter(change=>change.path.replace(/\\/g,'/').startsWith(prefix)).map(change => {
+    const code = `${change.index}${change.wt}`;
+    const mark = change.untracked ? 'U' : code.includes('U') || ['AA','DD'].includes(code) ? '!' : ['A','R','D','M'].find(value => code.includes(value)) || '?';
+    return [change.path.replace(/\\/g,'/').slice(prefix.length), mark];
+  })), [changes, prefix]);
+  const errorsByPath = useMemo(() => {
+    const counts = new Map();
+    for (const problem of problems) if (problem.severity === 'error') counts.set(problem.path, (counts.get(problem.path) || 0) + 1);
+    return counts;
+  }, [problems]);
+  const relative = path => {
+    const base=rootPath.replace(/[\\/]+$/,'');
+    return path.startsWith(`${base}/`) || path.startsWith(`${base}\\`) ? path.slice(base.length+1).replace(/\\/g,'/') : null;
+  };
 
   const [treeData, setTreeData] = useState([]);
   const [expandedDirs, setExpandedDirs] = useState({});
@@ -418,7 +437,7 @@ export function FileTree() {
 
   const renderEntries = (entries, depth = 0, parentPath = rootPath) =>
     entries.map((entry) => {
-      const indent = `calc(var(--panel-text) + ${depth} * var(--tree-step))`;
+      const indent = `calc(var(--panel-text) - var(--panel-box) + ${depth} * var(--tree-step))`;
 
       if (renaming?.path === entry.path) {
         return <div key={entry.path}>{renameForm(indent)}</div>;
@@ -440,7 +459,7 @@ export function FileTree() {
               onClick={() => { setSelected({ entry, parent: parentPath }); toggleDirectory(entry.path); }}
               onContextMenu={(e) => { setSelected({ entry, parent: parentPath }); openCtxMenu(e, entry, parentPath); }}
             >
-              {isExpanded ? <IconChevron size={13} open /> : <IconChevronRight size={13} />}
+              {isExpanded ? <IconChevron className="filetree__chevron" size={13} open /> : <IconChevronRight className="filetree__chevron" size={13} />}
               {isExpanded ? <IconFolderOpen size={15} /> : <IconFolder size={15} />}
               <span className="filetree__label">{entry.name}</span>
               <span className="filetree__node-actions">
@@ -458,7 +477,7 @@ export function FileTree() {
                 </button>
               </span>
             </div>
-            {inlineForm(entry.path, indent + 18)}
+            {inlineForm(entry.path, `calc(var(--panel-text) - var(--panel-box) + ${depth + 1} * var(--tree-step))`)}
             {isExpanded && children.length > 0 && renderEntries(children, depth + 1, entry.path)}
           </div>
         );
@@ -468,7 +487,7 @@ export function FileTree() {
         <div
           key={entry.path}
           className={`filetree__node ${activePath === entry.path || selected?.entry.path === entry.path ? 'is-active' : ''}`}
-          style={{ paddingLeft: `calc(${indent} + var(--tree-step))` }}
+          style={{ paddingLeft: indent }}
           draggable
           onDragStart={(e) => startDrag(e, entry, parentPath)}
           onDragOver={onLeafDragOver}
@@ -476,8 +495,9 @@ export function FileTree() {
           onClick={() => { setSelected({ entry, parent: parentPath }); handleSelectFile(entry.path, entry.name); }}
           onContextMenu={(e) => { setSelected({ entry, parent: parentPath }); openCtxMenu(e, entry, parentPath); }}
         >
-          {fileIcon(entry.name)}
+          <span className="filetree__chevron-slot" aria-hidden="true" />{fileIcon(entry.name)}
           <span className="filetree__label">{entry.name}</span>
+          <span className="filetree__badges">{changeByPath.has(relative(entry.path)) && <span className="filetree__git" data-status={changeByPath.get(relative(entry.path))} title="Estado de Git">{changeByPath.get(relative(entry.path))}</span>}{errorsByPath.has(entry.path) && <span className="filetree__errors" title={`${errorsByPath.get(entry.path)} errores`}>{errorsByPath.get(entry.path)}</span>}</span>
         </div>
       );
     });

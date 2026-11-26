@@ -75,7 +75,7 @@ function Tabs() {
   });
 
   return (
-    <div className="edtabs">
+    <div className="edtabs" role="tablist" aria-label="Archivos abiertos">
       {tabs.map((t) => {
         const dirty = !t.loading && t.content !== t.saved;
         const byAgent = streaming && agentTouched[t.path] && now - agentTouched[t.path] < AGENT_MARK_MS;
@@ -83,6 +83,16 @@ function Tabs() {
           <div
             key={t.path}
             className={`edtab ${t.path === activePath ? 'is-active' : ''}`}
+            role="tab"
+            aria-label={`${t.name}${dirty ? ', sin guardar' : ''}`}
+            aria-selected={t.path === activePath}
+            tabIndex={t.path === activePath ? 0 : -1}
+            onKeyDown={event=>{
+              if(event.target!==event.currentTarget)return;
+              const current=tabs.findIndex(tab=>tab.path===t.path);
+              const next=event.key==='ArrowRight'?(current+1)%tabs.length:event.key==='ArrowLeft'?(current+tabs.length-1)%tabs.length:event.key==='Home'?0:event.key==='End'?tabs.length-1:null;
+              if(next!==null){event.preventDefault();activate(tabs[next].path);event.currentTarget.parentElement.querySelectorAll('[role="tab"]')[next]?.focus();}
+            }}
             onClick={() => activate(t.path)}
             onAuxClick={(e) => { if (e.button === 1) closeTab(t.path); }}
             title={t.path}

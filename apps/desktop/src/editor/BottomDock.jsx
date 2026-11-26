@@ -10,9 +10,15 @@ import { useOutputStore, CHANNELS } from '../store/outputStore';
 import { TerminalPanel, TerminalTabs } from './TerminalPanel';
 import { SpinRing } from '../components/Ring';
 import { Switch } from '../components/Switch';
-import { IconX, IconRefresh, IconTrash } from '../components/Icons';
+import { IconX, IconRefresh, IconTrash, IconWarn } from '../components/Icons';
+import { FileIcon } from '@lixbon/icons/file-icons';
+import { LogoMark } from '../components/Logo';
 import { setDraftText } from '../store/draftStore';
 import { StatusIcon } from '@lixbon/icons/status';
+
+function ProblemMessage({ message }) {
+  return String(message).split(/(`[^`\n]+`|'[^'\n]+'|"[^"\n]+")/g).map((part,index)=>index%2?<code className="prob__quoted" key={index}>{part}</code>:part);
+}
 
 function Problems() {
   const { checker, problems, running, error, lastRun, auto, setAuto, run, detect } = useProblemsStore();
@@ -50,19 +56,19 @@ function Problems() {
         )}
         {byFile.map(([rel, list]) => (
           <section key={rel} className="prob__file">
-            <div className="prob__filehead"><span className="mono">{rel}</span><span className="count">{list.length}</span></div>
+            <div className="prob__filehead"><FileIcon nombre={rel} size={16}/><span className="mono">{rel}</span><span className="count">{list.length}</span></div>
             {list.map((p, i) => (
               <div key={i} className="prob__row">
-                <StatusIcon kind={p.severity === 'error' ? 'code-error' : 'permission'} size={14} />
+                <span className={`prob__severity prob__severity--${p.severity}`} role="img" aria-label={p.severity==='error'?'Error':'Aviso'}>{p.severity==='error'?<StatusIcon kind="code-error" size={14}/>:<IconWarn size={14}/>}</span>
                 <button className="prob__location" onClick={() => useFileViewStore.getState().revealLine(p.path, p.line)}>
-                <span className="prob__msg">{p.message}</span>
+                <span className="prob__msg"><ProblemMessage message={p.message}/></span>
                 {p.code && <span className="mono prob__code">{p.code}</span>}
                 <span className="mono prob__pos">{p.line}:{p.col}</span>
                 </button>
                 <button className="lk prob__fix" onClick={() => {
                   setDraftText(`Corrige este problema en ${rel}:${p.line}:${p.col}:\n${p.message}${p.code ? ` (${p.code})` : ''}`);
                   useWorkbenchStore.getState().setMode('agent');
-                }}>Arreglar con el agente</button>
+                }}><LogoMark size={14}/>Arreglar con el agente</button>
               </div>
             ))}
           </section>
