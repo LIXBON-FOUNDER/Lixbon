@@ -13,11 +13,11 @@ import { Switch } from '../../../components/Switch';
 import { Segmented } from '../../../components/Segmented';
 import { SpinRing } from '../../../components/Ring';
 import { StatusMark } from '../../Extensions/McpList';
+import { ServiceMark } from '../../../components/ServiceMark';
 import { PageHead } from '../SettingsParts';
 import { IconPlus, IconRefresh, IconTrash, IconPencil, IconEye, IconEyeOff, IconX, IconDownload, IconExternal, IconPuzzle } from '../../../components/Icons';
 
 const SCOPE_LABEL = { usuario: 'Global', proyecto: 'Proyecto' };
-const initials = (name) => name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).replace(/^./, (c) => c.toUpperCase()) || 'MC';
 const emptyRows = () => [{ key: '', value: '' }];
 const toRows = (obj) => { const r = Object.entries(obj || {}).map(([key, value]) => ({ key, value })); return r.length ? r : emptyRows(); };
 const fromRows = (rows) => Object.fromEntries(rows.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value]));
@@ -229,7 +229,7 @@ function ImportPanel({ root, installed, onDone }) {
       {sources?.map((s) => (
         <label key={s.id} className="mcpf__pick">
           <input type="checkbox" checked={!!picked[s.id]} disabled={!s.spec} onChange={(e) => setPicked({ ...picked, [s.id]: e.target.checked })} />
-          <span className="mcprow__tile">{initials(s.name)}</span>
+          <span className="mcprow__tile mcprow__tile--brand"><ServiceMark name={s.name} size={20} /></span>
           <span className="mcprow__main">
             <span className="srow__label">{s.name}{installed[s.name] && <span className="orch__pill">ya instalado</span>}</span>
             <span className="mono srow__tools">{s.source} · {s.remote ? `remoto: ${remoteUrlOf(s.spec)}` : s.spec ? joinCommandLine(s.spec) : 'formato no compatible'}</span>
@@ -267,7 +267,7 @@ function ServerRow({ s, root, onEdit }) {
 
   return (
     <div className={`srow mcprow ${s.status === 'error' && s.enabled ? 'is-error' : ''}`}>
-      <span className="mcprow__tile">{initials(s.name)}</span>
+      <span className="mcprow__tile mcprow__tile--brand"><ServiceMark name={s.name} size={20} /></span>
       <div className="mcprow__main">
         <span className="srow__label">
           {s.name}

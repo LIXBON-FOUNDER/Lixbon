@@ -1,7 +1,7 @@
 import { FileIcon } from '@lixbon/icons/file-icons';
-import { useId } from 'react';
+import { useEffect, useId } from 'react';
 import { attemptStatusInfo } from './adeLabels';
-import { formatDurationMs } from './attemptFormat';
+import { attemptLetter, formatDurationMs } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { Mark, PROVENANCE_VIEW } from './ProvenanceMark';
 import { useCoreQuery } from './useCoreQuery';
@@ -45,7 +45,7 @@ function ComparisonCards({ attempts, onOpenAttempt }) {
   return <div className="cmp-design-cards">{attempts.map((attempt) => {
     const selection = attempt.selection.provenance !== 'unknown' ? attempt.selection.value : null;
     return <article className="cmp-design-card" key={attempt.attempt_id}>
-      <header>{selection && <ProviderMark provider={selection.provider} size={18} />}<h4>{selection ? providerName(selection.provider) : 'Agente no informado'} <span>· Intento {attempt.n}</span></h4>{attempt.status.provenance !== 'unknown' && <StatusText info={attemptStatusInfo(attempt.status.value.status)} />}</header>
+      <header>{selection && <ProviderMark provider={selection.provider} size={16} />}<h4>{selection ? providerName(selection.provider) : 'Agente no informado'} <span>{attemptLetter(attempt.n)}</span></h4>{attempt.status.provenance !== 'unknown' && <StatusText info={attemptStatusInfo(attempt.status.value.status)} />}</header>
       <dl>
         <dt>Pruebas</dt><dd>{attempt.tests.provenance === 'unknown' ? 'No informado' : <>{String(attempt.tests.value)} <Mark provenance={attempt.tests.provenance} /></>}</dd>
         <dt>Cambios</dt><dd>{attempt.changes.files.provenance === 'unknown' ? 'No informado' : <Files changes={attempt.changes} />}</dd>
@@ -53,7 +53,7 @@ function ComparisonCards({ attempts, onOpenAttempt }) {
         <dt>Tiempo</dt><dd>{attempt.timing.provenance !== 'unknown' && Number.isSafeInteger(attempt.timing.value.duration_ms) ? formatDurationMs(attempt.timing.value.duration_ms) : 'No informado'}</dd>
       </dl>
       <p>{attempt.summary.provenance === 'unknown' ? 'Resumen no informado.' : attempt.summary.value}</p>
-      {onOpenAttempt && <button type="button" className="btn btn--ghost" onClick={() => onOpenAttempt({taskId: attempt.task_id, attemptId: attempt.attempt_id})}>Elegir intento {attempt.n}</button>}
+      {onOpenAttempt && <button type="button" className="btn btn--ghost" onClick={() => onOpenAttempt({taskId: attempt.task_id, attemptId: attempt.attempt_id})} title={`Abrir el intento ${attempt.n} para revisar e integrar`}>Elegir {attemptLetter(attempt.n)}</button>}
     </article>;
   })}</div>;
 }
@@ -145,11 +145,12 @@ function Overlaps({ overlaps }) {
   );
 }
 
-export function AttemptCompare({ attemptIds, onOpenAttempt, onClose, active = true }) {
+export function AttemptCompare({ attemptIds, onOpenAttempt, onClose, active = true, onComparisonChange }) {
   const uid = useId();
   const enabled = Boolean(active && Array.isArray(attemptIds) && attemptIds.length >= 2);
   const state = useCoreQuery('attempt_compare', { attempt_ids: attemptIds }, { enabled });
   const response = state.data ?? null;
+  useEffect(() => { onComparisonChange?.(response); return () => onComparisonChange?.(null); }, [response, onComparisonChange]);
   const count = attemptIds?.length ?? 0;
 
   return (

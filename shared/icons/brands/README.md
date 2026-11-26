@@ -9,6 +9,6 @@ import { BrandIcon } from '@lixbon/icons/brands';
 <BrandIcon name="chatgpt" size={16} />
 ```
 
-Codex y ChatGPT usan el símbolo de OpenAI presente en el lienzo; los alias no cambian la identidad ni el nombre del proveedor. También están disponibles GitHub y Linear. Un nombre desconocido no dibuja una marca.
+Codex y ChatGPT usan el símbolo de OpenAI presente en el lienzo; los alias no cambian la identidad ni el nombre del proveedor. También están disponibles GitHub, Linear y Slack. Un nombre desconocido no dibuja una marca. `hasBrand(name)` permite elegir un icono genérico como alternativa.
 
 Son marcas de sus respectivos titulares. Su inclusión en este catálogo no las convierte en iconos originales de Lixbon ni modifica sus derechos de marca.

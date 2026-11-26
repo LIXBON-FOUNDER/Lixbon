@@ -20,6 +20,7 @@ import { AttemptHistory } from './AttemptHistory';
 import { AttemptDetail } from './AttemptDetail';
 import { AttemptSelector } from './AttemptSelector';
 import { AttemptWorkspaceActions } from './AttemptWorkspaceHeader';
+import { ComparedFiles } from './ComparedFiles';
 import { ContextPreview } from './ContextPreview';
 import { NewAttemptForm } from './NewAttemptForm';
 import { ProviderInspector } from './ProviderInspector';
@@ -463,6 +464,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   const [inspectorTab, setInspectorTab] = useState('task');
   const [requestedAttemptTab, setRequestedAttemptTab] = useState(null);
   const [attemptSnapshot, setAttemptSnapshot] = useState(null);
+  const [comparisonSnapshot, setComparisonSnapshot] = useState(null);
   const [attentionTarget, setAttentionTarget] = useState(null);
   const [attentionNotice, setAttentionNotice] = useState(null);
   const [activityScopePref, setActivityScopePref] = useState(null);
@@ -495,6 +497,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   const selectedTaskId = adeSelection.taskId;
   const selectedAttemptId = adeSelection.attemptId ?? null;
   const selectedAttempt = attemptSnapshot?.id === selectedAttemptId && attemptSnapshot?.task_id === selectedTaskId ? attemptSnapshot : null;
+  const shownComparison = workspaceView === 'compare' && comparisonSnapshot?.attempts?.every(a => a.project_id === selectedProjectId && a.task_id === selectedTaskId) ? comparisonSnapshot : null;
   // ÚNICA decisión legacy / task_attempt_v1 del ADE (LXO-120); los hijos la reciben por props.
   const coreModel = useCoreModel({ active: modeActive });
   // LXO-123: lo guardado con forma F2 se migra (o se invalida con aviso) en cuanto se sabe el modelo; una sola vez.
@@ -947,8 +950,9 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
       <AdeActivityRail view={workspaceView === 'workspace' && inspectorTab === 'changes' ? 'review' : workspaceView} onSelect={(view) => { if (view === 'review') { setInspectorTab('changes'); changeWorkspaceView('workspace'); } else { if (view === 'workspace') setInspectorTab('task'); changeWorkspaceView(view); } }} hostsAvailable onIntegrations={() => changeWorkspaceView('integrations')} />
       <Collapse open={leftOpen && !['hosts', 'integrations'].includes(workspaceView)} size={Math.max(sizes.side, 240) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
-          <div className="panelhead"><span className="panelhead__title">Trabajo</span><span className="panelhead__fill" /><NewAttemptForm projectId={selectedProjectId} projectName={selectedProjectName} coreModel={coreModel} active={workspaceActive} triggerLabel="Nueva tarea" onCreated={({projectId, taskId, attemptId}) => attemptId ? selectAttempt({projectId, taskId, attemptId}) : selectTask({projectId, taskId})} /></div>
-          <div className="ade__nav-content">
+          <div className="panelhead"><span className="panelhead__title">{shownComparison ? 'Cambios' : 'Trabajo'}</span><span className="panelhead__fill" />{!shownComparison && <NewAttemptForm projectId={selectedProjectId} projectName={selectedProjectName} coreModel={coreModel} active={workspaceActive} triggerLabel="Nueva tarea" onCreated={({projectId, taskId, attemptId}) => attemptId ? selectAttempt({projectId, taskId, attemptId}) : selectTask({projectId, taskId})} />}</div>
+          {shownComparison && <ComparedFiles comparison={shownComparison} />}
+          <div className="ade__nav-content" style={shownComparison ? { display: 'none' } : undefined}>
             <section className="ade__nav-section ade__nav-scroll-region ade__nav-projects-scroll" aria-label="Projects y Tasks" tabIndex={0}>
               <ProjectsSidebar
                 selection={selectedAttemptId
@@ -1101,7 +1105,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
             </div>
             <div className="ade-view-panel ade-real-compare scroll" role="tabpanel" id={`${viewIds}-panel-compare`} aria-labelledby={`${viewIds}-tab-compare`} hidden={workspaceView !== 'compare'}>
               <header><h1>Comparar intentos</h1><p>Elige los intentos de una misma tarea para comparar su evidencia.</p></header>
-              {selectedTaskId ? <AttemptHistory taskId={selectedTaskId} coreModel={coreModel} active={workspaceActive && workspaceView === 'compare'} selectedAttemptId={selectedAttemptId} onSelectAttempt={(attemptId) => selectAttempt({projectId: selectedProjectId, taskId: selectedTaskId, attemptId})} onBack={() => changeWorkspaceView('workspace')} /> : <div className="ade-view-empty">Selecciona una tarea en Trabajo para ver sus intentos.</div>}
+              {selectedTaskId ? <AttemptHistory onComparisonChange={setComparisonSnapshot} taskId={selectedTaskId} coreModel={coreModel} active={workspaceActive && workspaceView === 'compare'} selectedAttemptId={selectedAttemptId} onSelectAttempt={(attemptId) => selectAttempt({projectId: selectedProjectId, taskId: selectedTaskId, attemptId})} onBack={() => changeWorkspaceView('workspace')} /> : <div className="ade-view-empty">Selecciona una tarea en Trabajo para ver sus intentos.</div>}
             </div>
             <div className="ade-view-panel" role="tabpanel" id={`${viewIds}-panel-map`} aria-labelledby={`${viewIds}-tab-map`} hidden={workspaceView !== 'map'}><CoreTaskMap key={selectedProjectId || 'none'} projectId={selectedProjectId} projectName={selectedProjectName} tasks={projectTaskDtos} status={projectTasks.status} error={projectTasks.error} onRetry={projectTasks.retry} hasMore={projectTaskContinuation.hasMore} onLoadMore={projectTaskContinuation.loadMore} onOpenTask={selectTask} /></div>
             {workspaceView === 'hosts' && <CoreHosts projectId={selectedProjectId} inventory={projectInventory.data} status={resourceInventoryStatus(projectInventory)} onRetry={projectInventory.retry} />}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { COPY, attemptStatusInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
 import { AttemptCompare } from './AttemptCompare';
@@ -12,13 +12,14 @@ import { useCoreQuery } from './useCoreQuery';
  * sin paginar): cada fila usa solo `attempt_brief`, nunca `attempt_detail` por fila. En modo legacy
  * (o Core sin la query) no consulta nada y avisa sin reintento; la Task sigue en la vista F2.
  */
-export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, onSelectAttempt, onBack, active = true }) {
+export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, onSelectAttempt, onBack, active = true, onComparisonChange }) {
   const enabled = Boolean(active && taskId && coreModel?.vNext);
   const state = useCoreQuery('attempts_by_task', { task_id: taskId }, { enabled });
   const items = Array.isArray(state.data?.items) ? [...state.data.items].sort((a, b) => a.n - b.n) : null;
   // LXO-154: comparar 2–4 intentos de la Task. Elegirlos no cambia nada: solo se piden al Core al pulsar «Comparar».
   const [picked, setPicked] = useState([]);
   const [comparing, setComparing] = useState(null);
+  useEffect(() => { setPicked([]); setComparing(null); }, [taskId]);
   const toggle = (id) => setPicked((now) => (now.includes(id) ? now.filter((x) => x !== id) : now.length < MAX_COMPARED ? [...now, id] : now));
   return (
     <section className="ade-attempts" aria-label={COPY.attemptHistory} data-testid="attempt-history">
@@ -32,6 +33,7 @@ export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, on
           <p className="ade-attempts__state ade-attempts__state--neutral">{COPY.noAttempts}</p>
         ) : (
           <>
+          <details className="ade-compare-selection" open={!comparing}><summary>{comparing ? 'Cambiar los intentos comparados' : 'Elegir intentos'}</summary>
           <ol className="ade-attempts__list">
             {items.map((attempt) => {
               const time = attemptTime(attempt);
@@ -80,8 +82,10 @@ export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, on
               <span className="nat__hint">Elige de {MIN_COMPARED} a {MAX_COMPARED} intentos. Comparar no cambia nada.</span>
             </div>
           )}
+          </details>
           {comparing && (
             <AttemptCompare
+              onComparisonChange={onComparisonChange}
               attemptIds={comparing}
               active={active}
               onClose={() => setComparing(null)}
@@ -95,7 +99,7 @@ export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, on
       ) : (
         <p className="ade-attempts__state" role="status">Cargando intentos.</p>
       )}
-      {selectedAttemptId && <AttemptActivity attemptId={selectedAttemptId} coreModel={coreModel} active={active} />}
+      {selectedAttemptId && !comparing && <AttemptActivity attemptId={selectedAttemptId} coreModel={coreModel} active={active} />}
     </section>
   );
 }

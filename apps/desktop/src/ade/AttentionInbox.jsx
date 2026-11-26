@@ -753,7 +753,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
             <h2>{label(TARGET_LABELS, selectedAttention.target_kind)} {selectedAttention.target_id}</h2>
             <p>{CATEGORY_HINTS[selectedAttention.category]}</p>
             <dl><dt>Proyecto</dt><dd>{selectedAttention.project_id || 'Sin proyecto'}</dd><dt>Qué hace</dt><dd>No informado</dd><dt>Por qué</dt><dd>No informado</dd><dt>Alcance</dt><dd>No informado</dd></dl>
-            {['approval', 'question'].includes(selectedAttention.category) && selectedAttention.target_kind === 'attempt' && selectedAttention.status === 'active' && <div data-testid="attention-launch-actions"><InboxLaunchApproval key={selectedAttention.id} attemptId={selectedAttention.target_id} /></div>}
+            {['approval', 'question'].includes(selectedAttention.category) && selectedAttention.target_kind === 'attempt' && selectedAttention.status === 'active' && <div data-testid="attention-launch-actions"><InboxLaunchApproval key={selectedAttention.id} attemptId={selectedAttention.target_id} onDecided={() => { list.retry(); overview.retry(); }} /></div>}
             {interactive && <button type="button" className="btn btn--ghost" onClick={() => onOpenTarget(toSummary(selectedAttention))}>Abrir el detalle</button>}
             <details className="attention-design-technical"><summary>Detalles de la decisión</summary><p>Identificador: {selectedAttention.id}</p><p>Ocurrencia: {selectedAttention.occurrence}</p>{selectedAttention.run_id && <p>Run: {selectedAttention.run_id}</p>}</details>
           </>}

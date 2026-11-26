@@ -8,6 +8,7 @@ import { ResourcesInventory } from './ResourcesInventory';
 import { ProviderMark } from '../orch/agent/ProviderMark';
 import { providerName } from '../orch/agent/agentIdentity';
 import { TASK_STATUS_LABELS } from './projectsSidebarModel';
+import { ServiceMark } from '../components/ServiceMark';
 
 const mapKey = (projectId) => `lixbon_core_map_positions:${projectId}`;
 const validPoint = (point) => Number.isFinite(point?.x) && Number.isFinite(point?.y) && point.x >= 0 && point.y >= 0 && point.x <= 5000 && point.y <= 5000;
@@ -46,5 +47,5 @@ export function CoreIntegrations() {
   const servers = useMcpStore((s) => s.servers);
   const loaded = useMcpStore((s) => s.loaded);
   const openSettings = useWorkbenchStore((s) => s.openSettings);
-  return <div className="ade-core-integrations"><header><h1>Integraciones</h1><p>Lo que pueden leer los intentos</p></header><div className="ade-core-integrations__list"><button type="button" onClick={() => openSettings('mcp')}><Icono nombre="nodos" size={24} /><span><b>Servidores MCP</b><small>{loaded ? `${Object.values(servers).filter((server) => server.status === 'ready').length} activos` : 'Sin información'}</small></span></button>{Object.values(servers).map((server) => <button type="button" key={server.name} onClick={() => openSettings('mcp')}><Icono nombre="nodos" size={20} /><span><b>{server.name}</b><small>{server.status === 'ready' ? `Conectado · ${server.tools?.length ?? 0} herramientas` : server.status === 'starting' ? 'Conectando…' : server.status === 'error' ? 'Error de conexión' : 'Sin conectar'}</small></span></button>)}</div><button type="button" className="btn btn--ghost" onClick={() => openSettings('mcp')}>Configurar integraciones</button></div>;
+  return <div className="ade-core-integrations"><header><h1>Integraciones</h1><p>Lo que pueden leer los intentos</p></header><div className="ade-core-integrations__list"><button type="button" onClick={() => openSettings('mcp')}><Icono nombre="nodos" size={20} /><span><b>Servidores MCP</b><small>{loaded ? `${Object.values(servers).filter((server) => server.enabled && server.status === 'ready').length} activos` : 'Sin información'}</small></span></button>{Object.values(servers).map((server) => <button type="button" key={server.name} onClick={() => openSettings('mcp')}><ServiceMark name={server.name} size={20} /><span><b>{server.name}</b><small>{!server.enabled ? 'Desactivado' : server.status === 'ready' ? `Conectado · ${Array.isArray(server.tools) ? server.tools.length : 'No informado'} herramientas` : server.status === 'starting' ? 'Conectando…' : server.status === 'error' ? 'Error de conexión' : 'Sin conectar'}</small></span></button>)}</div><button type="button" className="btn btn--ghost" onClick={() => openSettings('mcp')}>Configurar integraciones</button></div>;
 }

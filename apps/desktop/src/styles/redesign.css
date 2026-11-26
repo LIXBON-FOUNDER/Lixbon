@@ -251,6 +251,14 @@ html[data-ui='ide'] { --tb-h: 50px; --frame-rail: 44px; --frame-gap: 8px; }
 [data-ui='ide'] .f6-ide--unbound summary { cursor: pointer; }
 [data-ui='ide'] .f6-ide--unbound p { margin: 8px 0; }
 [data-ui='ide'] .rail__settings { margin-top: auto; }
+[data-ui='ide'] .extrow__tile--brand, [data-ui='ide'] .mcprow__tile--brand { background: transparent; border: 0; border-radius: 0; color: var(--ink); }
+[data-ui='ide'] .modeswitch__tab.is-active, [data-ui='ide'] .modeswitch__tab.is-active > svg { color: var(--ink); }
+[data-ui='ide'] .sm__item.is-active svg { color: var(--ink); }
+[data-ui='ide'] .sm__grouplabel { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+[data-ui='ide'] .spage__icon { width: 28px; height: 28px; background: transparent; color: var(--ink); border-radius: 0; }
+[data-ui='ide'] .spage__h1 { font-size: 16px; font-weight: 500; }
+[data-ui='ide'] .spage__sub { font-size: 14px; font-weight: 400; }
+[data-ui='ide'] .ssec__label { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; }
 @container chatbar (max-width: 400px) {
   [data-ui='ide'] .chat-inputbar__row > .modelchip { max-width: 156px; }
   [data-ui='ide'] .chat-inputbar__row > .chat-inputbar__ctx { display: none; }

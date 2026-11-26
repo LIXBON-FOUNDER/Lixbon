@@ -7,7 +7,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { FONT } from '../editor/TerminalPanel';
+import { FONT, TERMINAL_FONT_SIZE } from '../editor/TerminalPanel';
 import { currentXtermTheme } from '../editor/xtermThemes';
 import { watchTheme } from '../editor/themeMode';
 import { computePtySize, ptyCols } from '../lib/orchTermSize';
@@ -28,7 +28,7 @@ export function AgentTerminal({ task, live, visible = true }) {
     const term = new Terminal({
       theme: currentXtermTheme(),
       fontFamily: FONT,
-      fontSize: 12.5,
+      fontSize: TERMINAL_FONT_SIZE,
       lineHeight: 1.2,
       cursorBlink: true,
       cursorStyle: 'bar',
