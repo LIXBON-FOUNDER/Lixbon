@@ -1,3 +1,5 @@
+import { useGitStore } from '../store/gitStore';
+import { FileIcon } from '@lixbon/icons/file-icons';
 // TitleBar.jsx — barra de ventana propia (decorations: false): marca,
 // proyecto, selector de modo, buscador desplegable, paneles, cuenta y los
 // controles de ventana. En modo minimal (sin sesión) solo marca y controles.
@@ -38,7 +40,7 @@ const MODE_TABS = [
   { id: 'editor', label: 'Editor', Icon: IconModeEditor },
   { id: 'design', label: 'Diseño', Icon: IconModeDesign },
   { id: 'git', label: 'Git', Icon: IconModeGit },
-  { id: 'orch', label: 'Orquestar', Icon: IconModeOrch },
+  { id: 'orch', label: 'ADE', Icon: IconModeOrch },
 ];
 
 const baseName = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
@@ -54,7 +56,7 @@ function ModeSwitch() {
   const tabs = orchOn || mode === 'orch' ? MODE_TABS : MODE_TABS.filter((t) => t.id !== 'orch');
   const idx = Math.max(0, tabs.findIndex((t) => t.id === mode));
   return (
-    <nav className="modeswitch" aria-label="Modo" style={{ '--idx': idx }}>
+    <nav className="modeswitch" aria-label="Modos" style={{ '--idx': idx }}>
       <span className="modeswitch__thumb" />
       {tabs.map(({ id, label, Icon }) => {
         const chord = prettyChord(chordForCommand(`mode.${id}`));
@@ -78,6 +80,7 @@ function ModeSwitch() {
 }
 
 function ProjectMenu() {
+  const branch = useGitStore((state) => state.branch);
   const { workspaceRoot, recentFolders, openWorkspace } = useAppStore();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -98,9 +101,11 @@ function ProjectMenu() {
       <button ref={ref} className="projbtn tb__proj" onClick={() => setOpen((v) => !v)} title={workspaceRoot || 'Abrir una carpeta'}>
         <IconFolderBar size={16} />
         <span className="tb__projname">{baseName(workspaceRoot) || 'Sin carpeta'}</span>
+        {branch && <span className="tb__branch">{branch}</span>}
         <IconChevronDown size={13} />
       </button>
       <Popover anchorRef={ref} open={open} onClose={close} className="menu">
+        {branch && <button className="menu__item" onClick={() => { close(); useWorkbenchStore.getState().setMode('git'); }}><span className="menu__main">Rama · {branch}</span><span className="menu__hint">Cambiar en Git</span></button>}
         <div className="menu__label">Recientes</div>
         {recentFolders.length === 0 && <div className="menu__empty">Todavía no hay carpetas recientes</div>}
         {recentFolders.map((p) => (
@@ -219,8 +224,13 @@ function SearchExpand() {
         <input
           ref={inputRef}
           className="tsearch__input"
+          role="combobox"
+          aria-label="Busca archivos, comandos o agentes"
+          aria-expanded={open}
+          aria-controls={open ? 'global-search-results' : undefined}
+          aria-activedescendant={open && results[sel] && results[sel].kind !== 'note' ? `global-search-result-${sel}` : undefined}
           value={query}
-          placeholder={open ? 'Archivos, comandos o pregunta al agente' : 'Buscar o ejecutar'}
+          placeholder={open ? 'Busca archivos, comandos o agentes' : 'Buscar o ejecutar'}
           readOnly={!open}
           tabIndex={open ? 0 : -1}
           onChange={(e) => setQuery(e.target.value)}
@@ -230,18 +240,22 @@ function SearchExpand() {
         <span className="tsearch__kbd">Ctrl K</span>
       </div>
       <Popover anchorRef={boxRef} open={open} onClose={collapse} align="left" className="menu tsearch__results">
+        <div role="listbox" id="global-search-results" aria-label="Resultados">
         {results.map((r, i) => (
           r.kind === 'note'
             ? <div key={r.key} className="menu__empty">{r.label}</div>
             : (
               <button
                 key={`${r.kind}:${r.key}`}
+                id={`global-search-result-${i}`}
+                role="option"
+                aria-selected={i === sel}
                 className={`menu__item ${i === sel ? 'is-selected' : ''}`}
                 onMouseEnter={() => setSel(i)}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(r)}
               >
-                {r.kind === 'file' && <IconFileCode size={14} />}
+                {r.kind === 'file' && <FileIcon nombre={r.key} size={16} />}
                 {r.kind === 'cmd' && <span className="menu__chev">›</span>}
                 {r.kind === 'symbol' && <span className="menu__chev">@</span>}
                 {r.kind === 'text' && <IconSearch size={14} />}
@@ -251,6 +265,7 @@ function SearchExpand() {
               </button>
             )
         ))}
+        </div>
         <div className="tsearch__prefixes">
           {PREFIXES.map((p) => (
             <button key={p.key} className="tsearch__prefix" onMouseDown={(e) => e.preventDefault()} onClick={() => { setQuery(p.key); inputRef.current?.focus(); }}>
@@ -294,9 +309,6 @@ function PanelToggles() {
   const rightTitle = mode === 'orch' && orchView === 'ade' ? 'Inspector' : RIGHT_TITLE[mode] || 'Agente';
   return (
     <div className="ptoggles" role="group" aria-label="Paneles">
-      <button className={`ic tb__ic ${left ? 'is-on' : ''}`} onClick={toggleSide} title="Panel izquierdo (Ctrl B)" aria-label="Panel izquierdo" aria-pressed={!!left}>
-        <IconPanelLeft size={18} filled={!!left} />
-      </button>
       <button
         className={`ic tb__ic ${inEditor && terminalOpen ? 'is-on' : ''} ${inEditor ? '' : 'is-off'}`}
         onClick={inEditor ? toggleTerminal : undefined}
@@ -312,6 +324,12 @@ function PanelToggles() {
       </button>
     </div>
   );
+}
+
+function LeftPanelButton() {
+  const { toggleSide } = useWorkbenchStore();
+  const { left } = useWorkbenchStore(useShallow(selectSidePanels));
+  return <button className={`ic tb__ic ${left ? 'is-on' : ''}`} onClick={toggleSide} aria-label="Panel izquierdo" title="Panel izquierdo (Ctrl B)" aria-pressed={!!left}><IconPanelLeft size={18} filled={!!left} /></button>;
 }
 
 export function TitleBar({ minimal = false }) {
@@ -338,6 +356,7 @@ export function TitleBar({ minimal = false }) {
     <header className="titlebar titlebar--ide" data-tauri-drag-region>
       <div className="tb__l" data-tauri-drag-region>
         <AppMenu />
+        <LeftPanelButton />
         <ProjectMenu />
       </div>
       <ModeSwitch />

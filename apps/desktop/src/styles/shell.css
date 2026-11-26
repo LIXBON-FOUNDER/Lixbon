@@ -46,8 +46,8 @@
   border-radius: var(--radius);
   background: var(--bg-secondary);
   color: var(--ink);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--text-meta, 12.5px);
+  font-weight: var(--weight-title, 600);
   max-width: 220px;
   transition: background 0.15s ease, transform 0.1s ease;
 }
@@ -56,7 +56,7 @@
 
 .team__btn:hover, .team__btn.is-open {
   background: var(--bg-tertiary);
-  font-weight: 700;
+  font-weight: var(--weight-title, 700);
 }
 
 .team__stack {
@@ -122,12 +122,12 @@
 }
 
 .team__menu-title {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--text-meta, 13px);
+  font-weight: var(--weight-title, 700);
 }
 
 .team__conn {
-  font-size: 11px;
+  font-size: var(--text-meta, 11px);
   color: var(--ink-soft);
 }
 
@@ -190,15 +190,15 @@
 }
 
 .team__member-name {
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--text-meta, 12.5px);
+  font-weight: var(--weight-title, 600);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .team__member-status {
-  font-size: 11px;
+  font-size: var(--text-meta, 11px);
   color: var(--ink-soft);
 }
 
@@ -225,8 +225,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-meta, 12px);
+  font-weight: var(--weight-title, 600);
   color: var(--ink-soft);
 }
 
@@ -282,7 +282,7 @@
   align-self: flex-start;
   margin-top: 4px;
   padding: 0;
-  font-size: 11.5px;
+  font-size: var(--text-meta, 11.5px);
   color: var(--ink-soft);
   background: none;
   border: none;
@@ -296,7 +296,7 @@
 
 .account__error {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: var(--text-meta, 12px);
   color: var(--danger);
   line-height: 1.4;
 }
@@ -318,7 +318,7 @@
   align-items: center;
   gap: 8px;
   padding: 7px 12px;
-  font-size: 13px;
+  font-size: var(--text-meta, 13px);
   border-radius: var(--radius);
   text-align: left;
   color: var(--ink);
@@ -383,7 +383,7 @@
   border: none;
   outline: none;
   background: transparent;
-  font-size: 14.5px;
+  font-size: var(--text-chat, 14.5px);
 }
 
 .quickopen__list {
@@ -399,7 +399,7 @@
   gap: 9px;
   padding: 7px 12px;
   border-radius: var(--radius);
-  font-size: 13.5px;
+  font-size: var(--text-row, 13.5px);
   cursor: pointer;
   color: var(--ink);
 }
@@ -422,7 +422,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--text-meta, 12px);
   color: var(--ink-soft);
 }
 
@@ -437,7 +437,7 @@
 
 .cmd-item__cat {
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: var(--text-meta, 10.5px);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ink-soft);
@@ -452,7 +452,7 @@
 
 .cmd-item__chord {
   flex-shrink: 0;
-  font-size: 11.5px;
+  font-size: var(--text-meta, 11.5px);
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -475,7 +475,7 @@
   border-radius: var(--radius);
   color: var(--ink-70);
   text-align: left;
-  font-size: 12.5px;
+  font-size: var(--text-meta, 12.5px);
   transition: background 0.15s ease, color 0.15s ease;
 }
 
@@ -500,8 +500,8 @@
   border-radius: var(--radius);
   background: var(--primary);
   color: var(--on-primary);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--text-meta, 11px);
+  font-weight: var(--weight-title, 700);
   white-space: nowrap;
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
@@ -535,15 +535,15 @@
 }
 
 .acctcard__name {
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--text-meta, 12.5px);
+  font-weight: var(--weight-title, 600);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .acctcard__plan {
-  font-size: 10.5px;
+  font-size: var(--text-meta, 10.5px);
   color: var(--ink-35);
 }
 
@@ -575,13 +575,13 @@
 }
 
 .acctpop__title {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--text-row, 14px);
+  font-weight: var(--weight-title, 700);
 }
 
 .acctpop__hint {
   margin: -8px 0 14px;
-  font-size: 11.5px;
+  font-size: var(--text-meta, 11.5px);
   color: var(--ink-35);
 }
 
@@ -598,12 +598,12 @@
 }
 
 .acctpop__name {
-  font-size: 13.5px;
-  font-weight: 700;
+  font-size: var(--text-row, 13.5px);
+  font-weight: var(--weight-title, 700);
 }
 
 .acctpop__email {
-  font-size: 11.5px;
+  font-size: var(--text-meta, 11.5px);
   color: var(--ink-35);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -622,8 +622,8 @@
 }
 
 .acctpop__plan-name {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--text-meta, 12px);
+  font-weight: var(--weight-title, 700);
 }
 
 .acctpop__key {
@@ -639,7 +639,7 @@
 .acctpop__key-value {
   flex: 1;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta, 11px);
   color: var(--ink-50);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -657,14 +657,14 @@
   align-items: center;
   gap: 6px;
   color: var(--ink-50);
-  font-size: 11.5px;
+  font-size: var(--text-meta, 11.5px);
   padding: 2px 0;
   transition: color 0.15s ease;
   align-self: flex-start;
 }
 
 .acctpop__link:hover { color: var(--ink); }
-.acctpop__link--danger { color: var(--danger); font-weight: 600; }
+.acctpop__link--danger { color: var(--danger); font-weight: var(--weight-title, 600); }
 .acctpop__link--danger:hover { color: var(--danger); opacity: 0.85; }
 
 .acctpop__quota {
@@ -677,12 +677,12 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--text-meta, 12px);
   color: var(--ink-70);
   margin-bottom: 8px;
 }
 
-.acctpop__quota-pct { font-size: 10.5px; color: var(--ink-35); }
+.acctpop__quota-pct { font-size: var(--text-meta, 10.5px); color: var(--ink-35); }
 
 .acctpop__meter {
   display: block;
@@ -706,7 +706,7 @@
 /* Barra de estado inferior: eliminada en el rediseño — Git vive en la
    tarjeta de rama del sidebar; Consumo/versión, en el popover de la cuenta. */
 
-.team__badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: var(--on-accent); font-size: 10px; }
+.team__badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: var(--on-accent); font-size: var(--text-meta, 10px); }
 
 /* Prisma de lixbon: caras «sobre negro» en oscuro y las de la marca en claro. */
 .logomark { flex-shrink: 0; overflow: visible; --lx-f1: #E6DEC0; --lx-f2: #BFB48C; --lx-f3: #737D3E; --lx-f4: #454D25; }
@@ -753,13 +753,13 @@
 
 /* Lixbon Team en la barra: tus issues */
 .team__issues { display: flex; flex-direction: column; gap: 1px; padding: 0 2px 4px; }
-.team__issues-head { height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--ink-50); }
-.team__nueva { font-size: 11.5px; font-weight: 600; color: var(--accent); }
+.team__issues-head { height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font-size: var(--text-meta, 11px); font-weight: var(--weight-title, 600); letter-spacing: 0.04em; color: var(--ink-50); }
+.team__nueva { font-size: var(--text-meta, 11.5px); font-weight: var(--weight-title, 600); color: var(--accent); }
 .team__nueva:hover { color: var(--accent-deep); }
-.team__issue { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--radius); text-align: left; font-size: 12.5px; color: var(--ink-body); }
+.team__issue { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--radius); text-align: left; font-size: var(--text-meta, 12.5px); color: var(--ink-body); }
 .team__issue:hover { background: rgba(var(--ink-rgb), 0.06); color: var(--ink); }
-.team__issue-clave { flex-shrink: 0; font-size: 11px; color: var(--ink-50); }
+.team__issue-clave { flex-shrink: 0; font-size: var(--text-meta, 11px); color: var(--ink-50); }
 .team__issue-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.team__issue-v { flex-shrink: 0; font-size: 11px; color: var(--ink-soft); }
+.team__issue-v { flex-shrink: 0; font-size: var(--text-meta, 11px); color: var(--ink-soft); }
 .team__issue-v.is-tarde { color: var(--danger); }
 .team__issue-v.is-pronto { color: var(--warn); }

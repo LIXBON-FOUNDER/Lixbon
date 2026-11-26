@@ -1,3 +1,4 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // PreviewSidebar.jsx — navegación Project → Task → Intento (worktree + agente) de la vista previa.
 //  · 1 Intento  → la Task es una sola fila.  N Intentos → la Task es un grupo.
 //  · Estado (forma) y Attention (marcador ámbar) son ejes distintos; «sin leer» es un tercero (punto).
@@ -103,20 +104,20 @@ function TaskBlock({ task, project }) {
   );
 }
 
-function NewMenu() {
+export function NewMenu() {
   const s = usePreviewStore();
   const ref = useRef(null);
   const [open, setOpen] = useState(false);
   const pick = (fn) => () => { setOpen(false); fn(); };
   return (
     <>
-      <button ref={ref} type="button" className="ic" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} aria-label="Nuevo" title="Nueva Task o Intento">
-        <I n="plus" size={15} />
+      <button ref={ref} type="button" className="lk pv-newtask" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} aria-label="Nueva tarea" title="Nueva tarea o intento">
+        <I n="plus" size={14} /> Nueva tarea
       </button>
       <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} align="right">
         <div className="menu" role="menu">
           <button type="button" className="menu__item pv-menu__item" role="menuitem" onClick={pick(() => s.setOverlay({ type: 'newtask' }))}>
-            <span className="pv-menu__main">Nueva Task…</span><span className="pv-menu__hint">Un objetivo durable. Arranca su primer Intento.</span>
+            <span className="pv-menu__main">Nueva tarea…</span><span className="pv-menu__hint">Un objetivo durable. Arranca su primer intento.</span>
           </button>
           <button type="button" className="menu__item pv-menu__item" role="menuitem" onClick={pick(() => s.openFork(s.sel.attemptId))}>
             <span className="pv-menu__main">Nuevo Intento de esta Task…</span><span className="pv-menu__hint">Otra ejecución del mismo objetivo.</span>
@@ -153,7 +154,6 @@ export function PreviewSidebar() {
           <input value={s.filter.q} onChange={(e) => s.setFilter({ q: e.target.value })} placeholder="Buscar trabajo…" aria-label="Buscar trabajo" />
         </label>
         <button type="button" className={`ic${chips.length || s.filter.hostId ? ' is-on' : ''}`} onClick={() => setFilterOpen((v) => !v)} aria-label="Filtros" aria-expanded={filterOpen} title="Filtros"><I n="sliders" size={14} /></button>
-        <NewMenu />
       </div>
       {filterOpen && (
         <div className="pv-nav__filter">
@@ -174,9 +174,9 @@ export function PreviewSidebar() {
       )}
 
       <button type="button" className={`pv-need${s.view === 'attention' ? ' is-sel' : ''}${total ? '' : ' is-calm'}`} onClick={() => s.setView('attention')}>
-        <span className="pv-need__n mono">{total}</span>
+        <StatusIcon kind="attention" size={16} />
         <span className="pv-need__text">
-          <b>{total ? `${total === 1 ? 'Espera' : 'Esperan'} tu decisión` : 'Nada espera tu decisión'}</b>
+          <b>{total ? `${total} ${total === 1 ? 'espera' : 'esperan'} tu decisión` : 'Nada espera tu decisión'}</b>
           <small>{byKind || 'Los agentes trabajan dentro de su contrato.'}</small>
         </span>
         <I n="right" size={12} />
@@ -198,7 +198,7 @@ export function PreviewSidebar() {
                 <span className="pv-project__name">{p.name}</span>
                 <span className="panelhead__fill" />
                 {!open && attn > 0 && <AttnFlag n={attn} />}
-                <span className="pv-project__meta">{active > 0 ? `${active} en ejecución` : atts.length ? 'en reposo' : 'sin trabajo'}</span>
+                <span className="pv-project__meta">{active > 0 ? `${active} en marcha` : 'sin actividad'}</span>
               </button>
               {open && (
                 <div className="pv-project__body">
