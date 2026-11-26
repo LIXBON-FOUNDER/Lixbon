@@ -62,7 +62,7 @@ function readImage(file) {
   });
 }
 
-export function ChatInputBar() {
+export function ChatInputBar({ placeholder } = {}) {
   const draftKey = useSessionsStore((s) => s.activeKey);
   const draft = useDraftStore((s) => s.drafts[draftKey]) || EMPTY_DRAFT;
   const { text, images, mentions } = draft; // images: { name, dataUrl, base64 } · mentions: { name, path, rel }
@@ -436,7 +436,7 @@ export function ChatInputBar() {
       <textarea
         ref={textareaRef}
         className="chat-inputbar__textarea"
-        placeholder={isClaude && !agentActive ? 'Abre una carpeta de trabajo para usar Claude Code' : 'Responde o pide un cambio…'}
+        placeholder={isClaude && !agentActive ? 'Abre una carpeta de trabajo para usar Claude Code' : placeholder || 'Responde o pide un cambio…'}
         rows={1}
         value={text}
         onChange={onChange}
@@ -446,6 +446,7 @@ export function ChatInputBar() {
       />
 
       <div className="chat-inputbar__row">
+        <button className="ic chat-inputbar__attach" onClick={() => fileInputRef.current?.click()} title="Adjuntar imagen (o pega con Ctrl+V)"><IconClip size={15} /></button>
         {isClaude && (
           <span className="chat-inputbar__engine" title="Estás hablando con Claude Code">
             <ClaudeMark size={12} /><span className="chat-inputbar__engine-lbl">Claude Code</span>
@@ -513,9 +514,6 @@ export function ChatInputBar() {
 
         <div className="chat-inputbar__fill" />
 
-        <button className="ic" onClick={() => fileInputRef.current?.click()} title="Adjuntar imagen (o pega con Ctrl+V)">
-          <IconClip size={15} />
-        </button>
         {workspaceRoot && (
           <button className="ic chat-inputbar__at" onClick={insertAt} title="Mencionar un archivo (@)">
             <IconAt size={15} />

@@ -4,6 +4,7 @@ import { TASK_STATUS_LABELS } from './adeLabels';
 import { AnswerQuestion } from './AnswerQuestion';
 import { StatusMark } from './StatusMark';
 import './TaskWorkspace.css';
+import { AttemptPhases } from './AttemptWorkspaceHeader';
 
 // Task Workspace / Inspector de solo lectura (LXO-98).
 // Presenta exclusivamente lo que devuelve `task_detail` (project_id + task_id). No infiere host/origen ni
@@ -298,7 +299,7 @@ function Banner({ state, hasData, projectId, taskId }) {
  *   y con los IDs seleccionados. Sin callback se muestra "No disponible" (no hay vista simulada ni ruta legacy).
  * - `variant`: `'workspace'` (por defecto) o `'inspector'` (solo cambia la clase CSS compacta).
  */
-export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, onOpenActivity, onOpenAttention, variant = 'workspace', attemptSelector = null }) {
+export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, onOpenActivity, onOpenAttention, variant = 'workspace', attemptSelector = null, workspaceActions = null }) {
   const uid = useId();
   const state = detail ?? { status: 'idle', data: null, error: null, reason: null, updatedAt: null };
   const hasTarget = Boolean(text(projectId) && text(taskId));
@@ -348,16 +349,18 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
 
   return (
     <section className={className} aria-labelledby={headingId} aria-busy={busy} data-state={state.status} data-target-verified={verified}>
+      {visible && variant === 'workspace' && <p className="twk__breadcrumb">{projectName ?? 'Proyecto no informado'}</p>}
       <header className="twk__head">
         <h2 id={headingId} ref={headingRef} tabIndex={-1} className="twk__title">{visible ? (text(visible.title) ?? 'Task sin título') : 'Task'}</h2>
         {visible && (
           <span className={`twk__status twk__status--${info.group}`} data-status={info.raw ?? ''}><StatusMark info={{ raw: info.raw, known: info.group !== 'unknown' }} />{info.label}</span>
         )}
         {refreshable && <button type="button" className="twk__action" onClick={state.retry}>Actualizar</button>}
+        {visible && variant === 'workspace' && workspaceActions}
       </header>
       {visible && variant === 'workspace' && attemptSelector}
 
-      {visible && variant === 'workspace' && <div className="ade-core-phase"><div className="ade-start__phases" aria-label="Fases del intento"><span>Preparación</span><span>Ejecución</span><span>Verificación</span><span>Revisión · tú</span><span>Integración · tú</span></div><p>Fase: <PhaseValue phase={visible.phase} /></p></div>}
+      {visible && variant === 'workspace' && <div className="ade-core-phase"><AttemptPhases phase={visible.phase} /><p>Fase: <PhaseValue phase={visible.phase} /></p></div>}
 
       {visible && (
         <p className="twk__subtitle">

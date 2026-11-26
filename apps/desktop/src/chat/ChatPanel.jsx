@@ -110,7 +110,7 @@ export function ChatPanel({ wide = false }) {
           </>
         )}
       </div>
-      <ChatInputBar />
+      <ChatInputBar placeholder={wide ? undefined : 'Pide algo, @ para archivos, / para comandos'} />
     </div>
   );
 }

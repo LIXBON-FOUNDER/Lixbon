@@ -19,6 +19,7 @@ import { TaskWorkspace } from './TaskWorkspace';
 import { AttemptHistory } from './AttemptHistory';
 import { AttemptDetail } from './AttemptDetail';
 import { AttemptSelector } from './AttemptSelector';
+import { AttemptWorkspaceActions } from './AttemptWorkspaceHeader';
 import { ContextPreview } from './ContextPreview';
 import { NewAttemptForm } from './NewAttemptForm';
 import { ProviderInspector } from './ProviderInspector';
@@ -461,6 +462,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   const [workspaceView, setWorkspaceView] = useState('workspace');
   const [inspectorTab, setInspectorTab] = useState('task');
   const [requestedAttemptTab, setRequestedAttemptTab] = useState(null);
+  const [attemptSnapshot, setAttemptSnapshot] = useState(null);
   const [attentionTarget, setAttentionTarget] = useState(null);
   const [attentionNotice, setAttentionNotice] = useState(null);
   const [activityScopePref, setActivityScopePref] = useState(null);
@@ -492,6 +494,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   const selectedProjectId = adeSelection.projectId;
   const selectedTaskId = adeSelection.taskId;
   const selectedAttemptId = adeSelection.attemptId ?? null;
+  const selectedAttempt = attemptSnapshot?.id === selectedAttemptId && attemptSnapshot?.task_id === selectedTaskId ? attemptSnapshot : null;
   // ÚNICA decisión legacy / task_attempt_v1 del ADE (LXO-120); los hijos la reciben por props.
   const coreModel = useCoreModel({ active: modeActive });
   // LXO-123: lo guardado con forma F2 se migra (o se invalida con aviso) en cuanto se sabe el modelo; una sola vez.
@@ -1028,9 +1031,10 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               )}
               {selectedTaskId && (
                 <div className="ade__task-overview scroll">
-                  <TaskWorkspace {...workspaceProps} variant="workspace" attemptSelector={<AttemptSelector taskId={selectedTaskId} coreModel={coreModel} active={workspaceActive && workspaceView === 'workspace'} selectedAttemptId={selectedAttemptId} onSelect={(attemptId) => selectAttempt({projectId: selectedProjectId, taskId: selectedTaskId, attemptId})} onCompare={() => changeWorkspaceView('compare')} />} />
+                  <TaskWorkspace {...workspaceProps} variant="workspace" workspaceActions={selectedAttempt && <AttemptWorkspaceActions key={selectedAttempt.id} attempt={selectedAttempt} active={workspaceActive && workspaceView === 'workspace'} onOpenAttempt={({taskId,attemptId}) => selectAttempt({projectId:selectedProjectId,taskId,attemptId})} />} attemptSelector={<AttemptSelector taskId={selectedTaskId} coreModel={coreModel} active={workspaceActive && workspaceView === 'workspace'} selectedAttemptId={selectedAttemptId} onSelect={(attemptId) => selectAttempt({projectId: selectedProjectId, taskId: selectedTaskId, attemptId})} onCompare={() => changeWorkspaceView('compare')} />} />
                   {selectedAttemptId && (
                     <AttemptDetail
+                      onSnapshot={setAttemptSnapshot}
                       projectId={selectedProjectId}
                       attemptId={selectedAttemptId}
                       requestedTab={requestedAttemptTab}

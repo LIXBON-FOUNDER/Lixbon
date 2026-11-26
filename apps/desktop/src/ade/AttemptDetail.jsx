@@ -16,13 +16,14 @@ import { AttemptResume } from './AttemptResume';
 import { AttemptRetry } from './AttemptRetry';
 import { AttemptStop } from './AttemptStop';
 import { AttemptUsage } from './AttemptUsage';
-import { attemptDuration, formatUtc } from './attemptFormat';
+import { attemptDuration, formatDurationMs, formatUtc } from './attemptFormat';
 import { ATTEMPT_DETAIL_V2 } from './coreModelContract';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { PathText } from './PathText';
 import { AttemptOwnership } from './AttemptOwnership';
 import { AttemptTransfer } from './AttemptTransfer';
 import { useCoreQuery } from './useCoreQuery';
+import { formatCost, formatTokens } from './usageModel';
 
 /**
  * LXO-122 · Detalle de UN Attempt (solo lectura), de `attempt_detail`. Nada se inventa: lo que el
@@ -47,7 +48,7 @@ function Row({ label, children }) {
   return (<><dt>{label}</dt><dd>{children}</dd></>);
 }
 
-export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true, requestedTab = null }) {
+export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true, requestedTab = null, onSnapshot }) {
   const enabled = Boolean(active && attemptId && coreModel?.vNext);
   // Mientras el intento está activo se relee deprisa: «Detener», la cola y los avisos dependen de verlo `running` a tiempo (con el sondeo
   // normal, de 15 s, un intento corto terminaba antes de pintarse como activo).
@@ -57,6 +58,14 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
   const liveStatus = state.data?.attempt?.status;
   useEffect(() => { setFast(ACTIVE_ATTEMPT_STATUSES.includes(liveStatus)); }, [liveStatus]);
   const attempt = state.data?.attempt ?? null;
+  useEffect(() => { onSnapshot?.(attempt?.task_id === taskId ? attempt : null); }, [attempt, taskId, onSnapshot]);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!active || !ACTIVE_ATTEMPT_STATUSES.includes(attempt?.status) || !Number.isSafeInteger(attempt?.started_at)) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active, attempt?.status, attempt?.started_at]);
   const [detailTab, setDetailTab] = useState('activity');
   useEffect(() => { if (requestedTab?.tab === 'changes') setDetailTab('changes'); }, [requestedTab]);
 
@@ -82,11 +91,16 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
     const session = attempt.provider_session;
     const worktree = attempt.worktree;
     const review = attempt.review;
+    const runningDuration = ['running', 'starting'].includes(attempt.status) && Number.isSafeInteger(attempt.started_at) && attempt.started_at > 0 && now >= attempt.started_at
+      ? `${formatDurationMs(now - attempt.started_at)} en marcha` : null;
+    const usage = attempt.usage;
+    const tokens = Number.isSafeInteger(usage?.input_tokens) && usage.input_tokens >= 0 && Number.isSafeInteger(usage?.output_tokens) && usage.output_tokens >= 0 && Number.isSafeInteger(usage.input_tokens + usage.output_tokens) ? usage.input_tokens + usage.output_tokens : null;
     const artifacts = Array.isArray(attempt.artifacts) ? attempt.artifacts : [];
     body = (
       <>
-        <header className="ade-attempt-design-head"><h2>Intento {attempt.n}</h2><span>{[attempt.provider, attempt.model].filter(Boolean).join(' · ')}</span><StatusText info={attemptStatusInfo(attempt.status)} /></header>
-        <div className="ade-attempt-metrics"><span>{duration === COPY.notAvailable ? COPY.durationUnavailable : duration}</span><span>{worktree?.machine || COPY.hostUnavailable}</span>{worktree?.branch && <span className="mono">{worktree.branch}</span>}</div>
+        <header className={`ade-attempt-design-head${onSnapshot ? ' sr-only' : ''}`}><h2>Intento {attempt.n}</h2><span>{[attempt.provider, attempt.model].filter(Boolean).join(' · ')}</span><StatusText info={attemptStatusInfo(attempt.status)} /></header>
+        <div className="ade-attempt-metrics"><span>{runningDuration || (duration === COPY.notAvailable ? COPY.durationUnavailable : `${duration} en total`)}</span><span>{typeof usage?.cost_usd === 'number' && Number.isFinite(usage.cost_usd) && usage.cost_usd >= 0 ? formatCost(usage.cost_usd) : 'Coste no informado'}</span><span>{tokens === null ? 'Tokens no informados' : `${formatTokens(tokens)} tokens de entrada y salida`}</span></div>
+        <p className="ade-attempt-hostline">{worktree?.machine || COPY.hostUnavailable}{worktree?.path ? ' · worktree' : ''}{worktree?.branch && <> · <span className="mono">{worktree.branch}</span></>}</p>
         <nav className="ade-attempt-design-tabs" aria-label="Detalle del intento">{[['activity', 'Actividad'], ['changes', 'Cambios'], ['terminal', 'Terminal'], ['artifacts', 'Artefactos'], ['details', 'Acciones y detalles']].map(([id, label]) => <button type="button" key={id} aria-pressed={detailTab === id} className={detailTab === id ? 'is-active' : ''} onClick={() => setDetailTab(id)}>{label}</button>)}</nav>
         {attempt.status === 'pending_approval' && <AttemptApproval attemptId={attempt.id} onDecided={state.retry} />}
         {attempt.status === 'awaiting_terminal_approval' && <AttemptAnswer attemptId={attempt.id} onAnswered={state.retry} />}
@@ -203,7 +217,7 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
         {/* Autonomía de ESTE intento (LXO-210): cerrada hasta que se pide. */}
         <AutonomyEditor attemptId={attempt.id} />
         </div>
-        <AttemptQueue attempt={attempt} />
+        <AttemptQueue attempt={attempt} active={active} />
       </>
     );
   } else if (state.error) {

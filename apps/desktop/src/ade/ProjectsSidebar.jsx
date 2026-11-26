@@ -3,6 +3,7 @@ import { useCoreQuery } from './useCoreQuery';
 import { ProjectTasks } from './ProjectTasks';
 import { sumAttentionCounts } from './AttentionInbox';
 import { StatusIcon } from '@lixbon/icons/status';
+import { Icono } from '@lixbon/icons';
 import { useTreeNavigation } from './useTreeNavigation';
 import { UNKNOWN_CORE_MODEL } from './useCoreModel';
 import { coreErrorCode, isLegacyModelCode } from './coreModelContract';
@@ -112,7 +113,7 @@ function ProjectRow({ project, expanded, selected, context, position, setSize, i
         <span className="ps__name">{project.name || project.id}</span>
         <span className="ps__project-state">{Number.isFinite(counts.active) ? `${counts.active} en marcha` : statusLabel}</span>
       </span>
-      <details className="ps__project-details" onClick={(event) => event.stopPropagation()}><summary>Detalles del proyecto</summary>
+      <details className="ps__project-details" onClick={(event) => event.stopPropagation()}><summary aria-label="Detalles del proyecto" title="Detalles del proyecto"><Icono nombre="opciones" size={16} /><span className="sr-only">Detalles del proyecto</span></summary>
       <span className="ps__meta" id={metaId}>
         <span
           className={`ps__badge ps__badge--status${project.status ? ` ps__badge--status-${project.status}` : ''}`}
@@ -592,7 +593,7 @@ export function ProjectsSidebar({
         <h2 id={headingId} className="ps__title ps__sr-only">Proyectos</h2>
       </header>
 
-      <details className="ps__filter-menu"><summary>Filtrar tareas</summary><div className="ps__filters">
+      <details className="ps__filter-menu"><summary aria-label="Filtrar tareas" title="Filtrar tareas"><Icono nombre="filtro" size={16} /><span className="sr-only">Filtrar tareas</span></summary><div className="ps__filters">
         <span className="ps__filter-label" id={`${headingId}-tasks-filter`}>Estado de las Tasks</span>
         <div className="ps__radios" role="radiogroup" aria-labelledby={`${headingId}-tasks-filter`}>
           {TASK_STATUS_VIEWS.map((view) => (

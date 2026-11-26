@@ -3,6 +3,7 @@ import { StatusIcon } from '@lixbon/icons/status';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useGitStore } from '../store/gitStore';
 import { IconFolder, IconSearch, IconGitBranch, IconExtensions } from '../components/Icons';
+import { Icono } from '@lixbon/icons';
 
 const ITEMS = [
   { view: 'files', label: 'Explorador', kbd: 'Ctrl Shift E', Icon: IconFolder },
@@ -33,6 +34,7 @@ export function ActivityRail() {
           <Icon size={16} />
         </button>
       ))}
+      <button type="button" className="rail__btn rail__settings" aria-label="Ajustes" title="Ajustes" onClick={() => useWorkbenchStore.getState().openSettings()}><Icono nombre="ajustes" size={16} /></button>
     </nav>
   );
 }

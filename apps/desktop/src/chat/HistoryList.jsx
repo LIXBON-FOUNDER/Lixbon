@@ -196,7 +196,7 @@ export function HistoryList() {
 
   return (
     <div className="hist">
-      <details className="hist__tools"><summary><IconSearch size={14} />Buscar y filtrar</summary>
+      <details className="hist__tools"><summary aria-label="Buscar y filtrar" title="Buscar y filtrar"><IconSearch size={14} /><span>Buscar y filtrar</span></summary>
       <div className="hist__search">
         <div className="field">
           <IconSearch size={15} />
