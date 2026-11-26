@@ -1,4 +1,7 @@
 import { useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Modal } from '../components/Modal';
+import { providerName } from '../orch/agent/agentIdentity';
 import { ATTEMPT_PROFILES, createTaskOnly, createTaskWithAttempt, describeCommandError, newRequestId } from './attemptCommands';
 import { useProviderCapabilities } from './useProviderCapabilities';
 import './NewAttemptForm.css';
@@ -16,7 +19,7 @@ import './NewAttemptForm.css';
  */
 const startable = (provider) => provider?.matrix?.capabilities?.start?.state === 'available';
 
-export function NewAttemptForm({ projectId, projectName = null, coreModel, active = true, onCreated }) {
+export function NewAttemptForm({ projectId, projectName = null, coreModel, active = true, onCreated, triggerLabel = 'Nuevo intento' }) {
   const uid = useId();
   const enabled = Boolean(active && projectId && coreModel?.vNext);
   const { snapshot, unsupported, probing } = useProviderCapabilities({ enabled });
@@ -33,7 +36,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
   // Una clave por INTENCIÓN: reintentar tras un fallo de red devuelve la misma Task en vez de duplicarla.
   const requestId = useRef(null);
 
-  if (!enabled) return null;
+  if (!enabled) return <button type="button" className="btn btn--ghost btn--sm" disabled title={!projectId ? 'Selecciona un proyecto primero' : 'El Core aún no permite crear tareas con intentos'}>{triggerLabel}</button>;
 
   const providers = (snapshot?.providers ?? []).filter(startable);
   const chosen = providers.some((p) => p.id === provider) ? provider : providers[0]?.id ?? '';
@@ -80,11 +83,11 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
 
   return (
     <section className="nat" aria-label="Nuevo intento" data-testid="new-attempt">
-      {!open ? (
-        <button type="button" className="btn btn--primary btn--sm" onClick={() => setOpen(true)} data-testid="new-attempt-open">Nuevo intento</button>
-      ) : (
-        <form className="nat__form" onSubmit={submit} data-testid="new-attempt-form">
-          <h3 className="ssec__label">Nuevo intento</h3>
+      <button type="button" hidden={open} className="btn btn--ghost btn--sm" onClick={() => setOpen(true)} data-testid="new-attempt-open">{triggerLabel}</button>
+      {open && (
+        createPortal(<Modal title="Nuevo intento" subtitle={projectName || projectId} onClose={() => { if (!busy) { setOpen(false); setError(null); requestId.current = null; } }} footer={<div className="nat__actions"><button type="button" className="btn btn--ghost btn--sm" onClick={() => { setOpen(false); setError(null); requestId.current = null; }} disabled={busy}>Cancelar</button><button type="submit" form={`${uid}-form`} className="btn btn--primary btn--sm" disabled={!ready} data-testid="new-attempt-submit">{busy ? 'Creando…' : taskOnly ? 'Crear tarea' : 'Crear intento'}</button></div>}>
+        <form id={`${uid}-form`} className="nat__form" onSubmit={submit} data-testid="new-attempt-form">
+          <details className="nat__extra"><summary>Opciones de creación</summary>
           <fieldset className="nat__field nat__modes" data-testid="new-attempt-modes">
             <legend>¿Qué creas?</legend>
             <label>
@@ -96,6 +99,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
               {' '}Solo la tarea, sin ejecutar (después puedes adoptarle un worktree externo)
             </label>
           </fieldset>
+          </details>
           {/* Se anuncia el CAMBIO DE MODO, no cada letra del título (la vista previa de abajo no es una región viva). */}
           <p className="nat__sr" role="status" data-testid="new-attempt-announce">
             {taskOnly ? 'Se creará solo la tarea, sin intento.' : 'Se creará la tarea y su primer intento, que esperará tu aprobación.'}
@@ -106,15 +110,15 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
             <input id={`${uid}-title`} type="text" value={title} maxLength={512} onChange={(e) => setTitle(e.target.value)} data-testid="new-attempt-title" />
           </label>
           <label className="nat__field" htmlFor={`${uid}-instructions`}>
-            <span>{taskOnly ? 'Instrucciones (opcional)' : 'Instrucciones para el agente'}</span>
-            <textarea id={`${uid}-instructions`} rows={5} value={instructions} onChange={(e) => setInstructions(e.target.value)} data-testid="new-attempt-instructions" />
+            <span>{taskOnly ? 'Instrucciones (opcional)' : 'Qué tiene que conseguir'}</span>
+            <textarea id={`${uid}-instructions`} rows={3} value={instructions} onChange={(e) => setInstructions(e.target.value)} data-testid="new-attempt-instructions" />
           </label>
           {!taskOnly && (<>
           <div className="nat__row">
             <label className="nat__field" htmlFor={`${uid}-provider`}>
-              <span>Proveedor</span>
+              <span>Agente</span>
               <select id={`${uid}-provider`} value={chosen} onChange={(e) => setProvider(e.target.value)} disabled={!providers.length} data-testid="new-attempt-provider">
-                {providers.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
+                {providers.map((p) => <option key={p.id} value={p.id}>{providerName(p.id)}</option>)}
               </select>
             </label>
             <label className="nat__field" htmlFor={`${uid}-profile`}>
@@ -124,7 +128,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
               </select>
             </label>
           </div>
-          <div className="nat__row">
+          <details className="nat__extra"><summary>Modelo y esfuerzo</summary><div className="nat__row">
             <label className="nat__field" htmlFor={`${uid}-model`}>
               <span>Modelo (opcional)</span>
               <input id={`${uid}-model`} type="text" value={model} maxLength={128} onChange={(e) => setModel(e.target.value)} data-testid="new-attempt-model" />
@@ -133,8 +137,10 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
               <span>Esfuerzo (opcional)</span>
               <input id={`${uid}-effort`} type="text" value={effort} maxLength={128} onChange={(e) => setEffort(e.target.value)} data-testid="new-attempt-effort" />
             </label>
-          </div>
+          </div></details>
           </>)}
+          {!taskOnly && <p className="nat__note">El intento esperará tu aprobación antes de ejecutarse.</p>}
+          <details className="nat__extra"><summary>Qué ocurrirá al crear</summary>
           <div className="nat__preview" role="region" aria-label="Qué ocurrirá al crear" data-testid="new-attempt-preview">
             <strong>{taskOnly ? 'Crear (o Enter) hará esto:' : 'Crear el intento (o Enter) hará esto:'}</strong>
             <ul>
@@ -150,6 +156,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
               )}
             </ul>
           </div>
+          </details>
           {error && (
             <div className="ade-notice ade-notice--error" role="alert" data-testid="new-attempt-error">
               <span>{error.message}</span>
@@ -158,11 +165,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
               )}
             </div>
           )}
-          <div className="nat__actions">
-            <button type="submit" className="btn btn--primary btn--sm" disabled={!ready} data-testid="new-attempt-submit">{busy ? 'Creando…' : taskOnly ? 'Crear tarea' : 'Crear intento'}</button>
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setOpen(false); setError(null); requestId.current = null; }} disabled={busy}>Cancelar</button>
-          </div>
-        </form>
+        </form></Modal>, document.body)
       )}
     </section>
   );

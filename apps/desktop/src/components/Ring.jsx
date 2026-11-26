@@ -1,11 +1,7 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // Ring.jsx — anillo de progreso: girando para "en curso" o fijo para un %.
 export function SpinRing({ size = 14, color = 'var(--accent)' }) {
-  return (
-    <svg className="spinring" width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="6" stroke="var(--surface-6)" />
-      <circle cx="8" cy="8" r="6" stroke={color} strokeLinecap="round" strokeDasharray="11 27" />
-    </svg>
-  );
+  return <StatusIcon kind="working" size={size} style={{ color }} />;
 }
 
 export function ProgressRing({ value = 0, size = 18, stroke = 2.4, color }) {

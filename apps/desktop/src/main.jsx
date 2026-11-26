@@ -1,8 +1,11 @@
+import '@lixbon/icons/css';
+import '@lixbon/icons/status/css';
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import "@fontsource-variable/hanken-grotesk";
+import "@lixbon/fonts/sans.css";
+import "@lixbon/fonts/serif-variable.css";
 import "@fontsource-variable/jetbrains-mono";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/base.css";
@@ -17,13 +20,19 @@ import "./styles/settings.css";
 import "./styles/orch.css";
 import "./styles/mascota.css";
 import "./styles/ide.css";
+import "./styles/redesign.css";
+import "./styles/ade-redesign.css";
 import { initUiScale } from "./lib/uiScale";
 import { initFrameSize } from "./lib/frameSize";
 import { useCodexTermStore } from "./orch/codexterm/codexTermStore";
+import { useWorkbenchStore } from "./store/workbenchStore";
 
 async function start() {
   // Fuera de Tauri (navegador en `npm run dev`) se simula la API nativa.
-  if (import.meta.env.DEV && !window.__TAURI_INTERNALS__) await import("./dev/tauriMock");
+  if (import.meta.env.DEV && !window.__TAURI_INTERNALS__) {
+    const browserAdapter = await import("./dev/tauriMock");
+    browserAdapter.initializeBrowserWorkbench(useWorkbenchStore);
+  }
   // Solo la ventana del IDE: Team y el aviso de la mascota no llevan este rediseño.
   document.documentElement.dataset.ui = "ide";
   initUiScale();
