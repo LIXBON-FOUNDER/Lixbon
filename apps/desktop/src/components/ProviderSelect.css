@@ -1,0 +1,6 @@
+.provider-select { position: relative; display: block; min-width: 0; }
+.provider-select > select { width: 100%; min-width: 0; font: inherit; color: inherit; }
+.provider-select__mark { position: absolute; inset: 0 auto 0 12px; width: 16px; display: flex; align-items: center; pointer-events: none; }
+.provider-select__mark > * { flex: none; }
+[data-ui='ide'] .provider-select.has-mark > select { padding-left: 38px; }
+[data-ui='ide'] .providermark { background: none; border-radius: 0; }

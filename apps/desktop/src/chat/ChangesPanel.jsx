@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // ChangesPanel.jsx — lo que hizo el agente en esta conversación: archivos
 // cambiados (diff real contra el contenido previo, aceptar o revertir), el
 // contexto que leyó y los comandos que ejecutó.
@@ -120,7 +121,7 @@ function ChangesTab() {
             onClick={() => setSelected(c.path)}
           >
             {!c.pending && <IconCheck size={12} />}
-            <span className="mono changes__path">{c.path}</span>
+            <FileIcon nombre={c.path} size={16} /><span className="mono changes__path">{c.path}</span>
             {c.kind === 'create' && <span className="tag tag--good">nuevo</span>}
             {c.kind === 'delete' && <span className="tag tag--danger">borrado</span>}
             {c.pending && <span className="mono diffstat"><em className="is-add">+{c.added}</em> <em className="is-del">−{c.removed}</em></span>}
@@ -133,14 +134,14 @@ function ChangesTab() {
       <div className="changes__actions">
         {current?.pending && (
           <>
-            <button className="btn btn--ghost btn--sm" onClick={() => accept(current)}>Aceptar</button>
-            <button className="lk" onClick={() => revert(current)}>Revertir</button>
+            <button className="btn btn--primary btn--sm" onClick={() => accept(current)}>Aceptar</button>
           </>
         )}
         <div className="panelhead__fill" />
         {current && current.kind !== 'delete' && !current.reverted && (
-          <button className="lk" onClick={() => openInEditor(current)}>Abrir en editor</button>
+          <button className="btn btn--ghost btn--sm" onClick={() => openInEditor(current)}>Revisar</button>
         )}
+        {current?.pending && <button className="lk" onClick={() => revert(current)}>Descartar</button>}
       </div>
       {pendingFiles.length > 1 && (
         <div className="changes__actions changes__actions--all">
@@ -234,6 +235,7 @@ function TerminalTab() {
 
 export function ChangesPanel() {
   const [tab, setTab] = useState('changes');
+  const files = useTouchedFiles();
   return (
     <div className="changes">
       <div className="panelhead">
@@ -242,7 +244,7 @@ export function ChangesPanel() {
           value={tab}
           onChange={setTab}
           width={76}
-          options={[{ value: 'changes', label: 'Cambios' }, { value: 'context', label: 'Contexto' }, { value: 'terminal', label: 'Terminal' }]}
+          options={[{ value: 'changes', label: `Cambios${files.length ? ` ${files.length}` : ''}` }, { value: 'context', label: 'Contexto' }, { value: 'terminal', label: 'Terminal' }]}
         />
       </div>
       {tab === 'changes' && <ChangesTab />}

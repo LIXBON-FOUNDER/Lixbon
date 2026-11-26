@@ -38,6 +38,7 @@ export function IdeOwnershipBanner({ active, onSelect }) {
   const report = query.status === 'ready' ? query.data : null;
   const owner = report?.owner;
   const select = (a) => onSelect({ project_id: scope.project_id, task_id: a.task_id, attempt_id: a.id ?? a.attempt_id });
+  if (!bound) return <details className="f6-ide f6-ide--unbound"><summary>AI Work</summary><p>Workspace sin vínculo verificado. Abre un Attempt desde ADE para consultar su propietario.</p></details>;
   return <div className="f6-ide" aria-label="AI Work" role="region">
     {!bound ? <p>AI Work · Workspace sin vínculo verificado. Abre un Attempt desde ADE para consultar su propietario.</p> : <>
       <p>{scope.task_id} / {scope.attempt_id} · {scope.branch ?? 'sin rama'} · {scope.host ?? 'host no informado'} · {scope.root}</p>

@@ -1,0 +1,4 @@
+.lx-status { flex-shrink: 0; vertical-align: middle; }
+.lx-status .lx-gira { transform-origin: 12px 12px; animation: lx-status-spin .9s linear infinite; }
+@keyframes lx-status-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lx-status .lx-gira { animation: none; } }

@@ -32,7 +32,7 @@ function Wave({ bars, level, rank, total, className = '' }) {
   );
 }
 
-export function EffortSlider({ levels, value, onChange }) {
+export function EffortSlider({ levels, value, onChange, inline = false }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef(null);
   const popRef = useRef(null);
@@ -69,6 +69,11 @@ export function EffortSlider({ levels, value, onChange }) {
   const shown = open ? draft : current;
   const info = LEVELS[shown] || { label: shown, desc: '' };
   const pct = stops.length > 1 ? (idx / (stops.length - 1)) * 100 : 0;
+
+  if (inline) return <div className="modelmenu__effort" role="group" aria-label="Razonamiento">
+    <input type="range" aria-label="Nivel de razonamiento" aria-valuetext={info.label} min={0} max={stops.length - 1} step={1} value={idx} onChange={(event) => setDraft(stops[Number(event.target.value)])} onPointerUp={(event) => commit(stops[Number(event.currentTarget.value)])} onKeyUp={(event) => { if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') commit(stops[Number(event.currentTarget.value)]); }} />
+    <div className="modelmenu__levels">{stops.map((level) => <button type="button" role="menuitemradio" aria-checked={level === current} key={level} className={level === current ? 'is-active' : ''} onClick={() => { setDraft(level); commit(level); }}>{LEVELS[level]?.short || level}</button>)}</div>
+  </div>;
 
   return (
     <>

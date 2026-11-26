@@ -1,6 +1,9 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // ApprovalCard.jsx — aprobación de un cambio del agente (crear/editar/eliminar).
 // Aparece sobre la caja de entrada mientras el turno del agente espera.
 import { useChatStore } from '../store/chatStore';
+import { useAppStore } from '../store/appStore';
+import { isNeverAutoCommand } from '../lib/agentProtocol';
 
 const KIND_LABEL = {
   create: 'Crear archivo',
@@ -14,6 +17,7 @@ const KIND_LABEL = {
 export function ApprovalCard() {
   const pending = useChatStore((s) => s.pendingApproval);
   const resolveApproval = useChatStore((s) => s.resolveApproval);
+  const root = useAppStore((s) => s.workspaceRoot);
   if (!pending) return null;
 
   const { tool, args, change } = pending;
@@ -30,7 +34,7 @@ export function ApprovalCard() {
   return (
     <div className="approval">
       <div className="approval__head">
-        <span className="approval__kind">{label}</span>
+        <StatusIcon kind="permission" size={16} /><span className="approval__kind">Te pide permiso</span>
         {!isCommand && <span className="approval__path">{path}</span>}
         {change && (change.added > 0 || change.removed > 0) && (
           <span className="approval__counts">
@@ -40,6 +44,7 @@ export function ApprovalCard() {
         )}
       </div>
 
+      <p className="approval__description">{isCommand ? 'Quiere ejecutar este comando en el proyecto' : label}</p>
       {isCommand && (
         <pre className="approval__diff approval__command">$ {command}</pre>
       )}
@@ -60,14 +65,15 @@ export function ApprovalCard() {
 
       <div className="approval__actions">
         <button className="approval__btn approval__btn--primary" onClick={() => resolveApproval('yes')}>
-          {isCommand ? 'Ejecutar' : 'Aplicar'}
+          Permitir
         </button>
         <button
           className="approval__btn"
-          onClick={() => resolveApproval('always')}
-          title={isCommand ? 'Ejecutar comandos sin preguntar durante esta sesión' : 'Auto-aprobar el resto de la conversación'}
+          onClick={() => resolveApproval(isCommand ? 'project' : 'always')}
+          disabled={isCommand && (!root || isNeverAutoCommand(command))}
+          title={isCommand ? (isNeverAutoCommand(command) ? 'Este comando requiere permiso en cada ejecución' : 'Guardar solo este comando para este proyecto') : 'Auto-aprobar el resto de la conversación'}
         >
-          {isCommand ? 'Ejecutar siempre' : 'Aplicar todo'}
+          {isCommand ? 'Siempre en este proyecto' : 'Aplicar todo'}
         </button>
         <button className="approval__btn approval__btn--danger" onClick={() => resolveApproval('no')}>
           Rechazar

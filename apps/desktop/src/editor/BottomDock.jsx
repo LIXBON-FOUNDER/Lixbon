@@ -11,6 +11,8 @@ import { TerminalPanel, TerminalTabs } from './TerminalPanel';
 import { SpinRing } from '../components/Ring';
 import { Switch } from '../components/Switch';
 import { IconX, IconRefresh, IconTrash } from '../components/Icons';
+import { setDraftText } from '../store/draftStore';
+import { StatusIcon } from '@lixbon/icons/status';
 
 function Problems() {
   const { checker, problems, running, error, lastRun, auto, setAuto, run, detect } = useProblemsStore();
@@ -50,12 +52,18 @@ function Problems() {
           <section key={rel} className="prob__file">
             <div className="prob__filehead"><span className="mono">{rel}</span><span className="count">{list.length}</span></div>
             {list.map((p, i) => (
-              <button key={i} className="prob__row" onClick={() => useFileViewStore.getState().revealLine(p.path, p.line)}>
-                <span className={`dot dot--${p.severity === 'error' ? 'danger' : 'warn'}`} />
+              <div key={i} className="prob__row">
+                <StatusIcon kind={p.severity === 'error' ? 'code-error' : 'permission'} size={14} />
+                <button className="prob__location" onClick={() => useFileViewStore.getState().revealLine(p.path, p.line)}>
                 <span className="prob__msg">{p.message}</span>
                 {p.code && <span className="mono prob__code">{p.code}</span>}
                 <span className="mono prob__pos">{p.line}:{p.col}</span>
-              </button>
+                </button>
+                <button className="lk prob__fix" onClick={() => {
+                  setDraftText(`Corrige este problema en ${rel}:${p.line}:${p.col}:\n${p.message}${p.code ? ` (${p.code})` : ''}`);
+                  useWorkbenchStore.getState().setMode('agent');
+                }}>Arreglar con el agente</button>
+              </div>
             ))}
           </section>
         ))}
@@ -97,8 +105,8 @@ export function BottomDock({ onClose }) {
   const { errors, warnings } = problemCounts(useProblemsStore((s) => s.problems));
   const unread = useOutputStore((s) => Object.values(s.unread).some((n) => n > 0));
   const TABS = [
-    { id: 'terminal', label: 'Terminal' },
     { id: 'problems', label: 'Problemas', count: errors + warnings, tone: errors ? 'danger' : 'warn' },
+    { id: 'terminal', label: 'Terminal' },
     { id: 'output', label: 'Salida', dot: unread },
   ];
 
