@@ -16,13 +16,15 @@ const RUN_END = new Set([
 
 const FINAL = new Set(['activity.attempt.completed', 'activity.attempt.failed', 'activity.attempt.stopped', 'activity.attempt.exited']);
 
-const bySequence = (a, b) => (Number(a.seq) - Number(b.seq)) || ((a.ts ?? 0) - (b.ts ?? 0));
+// El DTO valida seq como i64 canónico: Number perdería precisión a partir de 2^53.
+// El reloj del host no determina el orden durable de los eventos.
+const bySequence = (a, b) => BigInt(a.seq) < BigInt(b.seq) ? -1 : BigInt(a.seq) > BigInt(b.seq) ? 1 : 0;
 const isTime = (value) => Number.isFinite(value) && value > 0;
 
 /** @returns {Array<{id: string, kind: 'before'|'run'|'closing'|'after', n: number|null, open: boolean, startedAt: number|null, durationMs: number|null, endKey: string|null, items: object[]}>} */
 export function groupAttemptActivity(items) {
   if (!Array.isArray(items)) return [];
-  const chronological = [...items].sort(bySequence);
+  const chronological = [...new Map(items.map(item => [item.event_id, item])).values()].sort(bySequence);
   const groups = [];
   let runs = 0;
   let current = null;

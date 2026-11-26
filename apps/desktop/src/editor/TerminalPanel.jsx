@@ -17,6 +17,7 @@ import { Select } from '../components/Select';
 import { IconX, IconPlus } from '../components/Icons';
 
 export const FONT = "'JetBrains Mono Variable', 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace";
+export const TERMINAL_FONT_SIZE = 13;
 
 const SHELLS = [
   { id: 'powershell', label: 'PowerShell' },
@@ -34,7 +35,7 @@ function TerminalInstance({ session, active }) {
     const term = new Terminal({
       theme: currentXtermTheme(),
       fontFamily: FONT,
-      fontSize: 12.5,
+      fontSize: TERMINAL_FONT_SIZE,
       lineHeight: 1.2,
       letterSpacing: 0,
       fontWeight: 400,

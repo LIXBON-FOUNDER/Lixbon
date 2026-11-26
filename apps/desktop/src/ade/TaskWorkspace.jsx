@@ -4,6 +4,9 @@ import { TASK_STATUS_LABELS } from './adeLabels';
 import { AnswerQuestion } from './AnswerQuestion';
 import { StatusMark } from './StatusMark';
 import './TaskWorkspace.css';
+import { AttemptPhases } from './AttemptWorkspaceHeader';
+import { evidenceForAttempt, evidenceObjective } from './attemptEvidence';
+import { Mark } from './ProvenanceMark';
 
 // Task Workspace / Inspector de solo lectura (LXO-98).
 // Presenta exclusivamente lo que devuelve `task_detail` (project_id + task_id). No infiere host/origen ni
@@ -298,7 +301,7 @@ function Banner({ state, hasData, projectId, taskId }) {
  *   y con los IDs seleccionados. Sin callback se muestra "No disponible" (no hay vista simulada ni ruta legacy).
  * - `variant`: `'workspace'` (por defecto) o `'inspector'` (solo cambia la clase CSS compacta).
  */
-export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, onOpenActivity, onOpenAttention, variant = 'workspace' }) {
+export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, onOpenActivity, onOpenAttention, variant = 'workspace', attemptSelector = null, workspaceActions = null, attemptId = null, attemptEvidence = null }) {
   const uid = useId();
   const state = detail ?? { status: 'idle', data: null, error: null, reason: null, updatedAt: null };
   const hasTarget = Boolean(text(projectId) && text(taskId));
@@ -306,6 +309,8 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
   const verified = Boolean(task) && hasTarget && task.id === taskId && task.project_id === projectId;
   const mismatched = Boolean(task) && hasTarget && !verified;
   const visible = verified ? task : null;
+  const proof = visible ? evidenceForAttempt(attemptEvidence, attemptId, visible.id) : null;
+  const objective = evidenceObjective(proof);
   const busy = state.status === 'loading' || state.status === 'refreshing';
   const className = `twk twk--${variant === 'inspector' ? 'inspector' : 'workspace'}`;
   const headingId = `${uid}-title`;
@@ -348,13 +353,18 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
 
   return (
     <section className={className} aria-labelledby={headingId} aria-busy={busy} data-state={state.status} data-target-verified={verified}>
+      {visible && variant === 'workspace' && <p className="twk__breadcrumb">{projectName ?? 'Proyecto no informado'}</p>}
       <header className="twk__head">
         <h2 id={headingId} ref={headingRef} tabIndex={-1} className="twk__title">{visible ? (text(visible.title) ?? 'Task sin título') : 'Task'}</h2>
         {visible && (
           <span className={`twk__status twk__status--${info.group}`} data-status={info.raw ?? ''}><StatusMark info={{ raw: info.raw, known: info.group !== 'unknown' }} />{info.label}</span>
         )}
         {refreshable && <button type="button" className="twk__action" onClick={state.retry}>Actualizar</button>}
+        {visible && variant === 'workspace' && workspaceActions}
       </header>
+      {visible && variant === 'workspace' && attemptSelector}
+
+      {visible && variant === 'workspace' && <div className="ade-core-phase"><AttemptPhases phase={visible.phase} /><p>Fase: <PhaseValue phase={visible.phase} /></p></div>}
 
       {visible && (
         <p className="twk__subtitle">
@@ -397,6 +407,17 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
       )}
 
       {visible && (
+        <>
+        {/* Objetivo solo desde la evidencia explícita del Core para este intento y Task.
+            No se deduce del título/spec; los campos sin contrato conservan su estado vacío. */}
+        <div className="twk__design-summary">
+          <section className="twk__design-section" aria-labelledby={`${uid}-objective`}><h3 id={`${uid}-objective`}>Objetivo</h3><p>{objective || <Missing />}</p>{objective && proof.objective.provenance === 'agent_reported' && <Mark provenance="agent_reported" />}</section>
+          <section className="twk__design-section" aria-labelledby={`${uid}-criteria`}><h3 id={`${uid}-criteria`}>Criterios de aceptación</h3><p><Missing /></p></section>
+          <section className="twk__design-section" aria-labelledby={`${uid}-constraints`}><h3 id={`${uid}-constraints`}>Restricciones</h3><p><Missing /></p></section>
+          <section className="twk__design-section" aria-labelledby={`${uid}-decisions`}><h3 id={`${uid}-decisions`}>Decisiones tomadas</h3><p><Missing /></p></section>
+          <section className="twk__design-section" aria-labelledby={`${uid}-parent`}><h3 id={`${uid}-parent`}>Tarea principal</h3><p>{visible.parent_id === null ? 'Esta es una tarea principal' : <TaskLink projectId={visible.project_id} taskId={visible.parent_id} relation="Task padre" onNavigate={navigate} />}</p></section>
+        </div>
+        <details className="twk__details"><summary>Detalles de la tarea</summary>
         <div className="twk__body">
           <Section id={`${uid}-identity`} title="Identidad">
             <Row label="Task"><Value value={visible.title} fallback="Task sin título" /></Row>
@@ -471,6 +492,8 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
 
           <p className="twk__hint twk__verified">Target verificado: la respuesta coincide con el Project ID y Task ID seleccionados. Solo lectura, salvo responder las preguntas abiertas.</p>
         </div>
+        </details>
+        </>
       )}
     </section>
   );

@@ -104,6 +104,7 @@ export function AppMenu() {
         className={`titlebar__brand appmenu__btn ${open ? 'is-open' : ''}`}
         onClick={() => { setActive(0); setOpen((v) => !v); }}
         title="Menú (Alt)"
+        aria-label="Menú (Alt)"
       >
         <LogoMark size={18} />
         <span className="titlebar__word">lixbon</span>

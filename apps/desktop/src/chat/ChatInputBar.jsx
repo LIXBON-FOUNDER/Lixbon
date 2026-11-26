@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // ChatInputBar.jsx — caja de entrada del chat (crema, redondeada, según diseño web)
 // con menciones de archivo (@) y selector de modelo.
 //
@@ -12,14 +13,13 @@ import { listFiles } from '../lib/tauri';
 import { runCommand } from '../lib/commands';
 import { useAnchoredAbove } from '../lib/useAnchoredPopover';
 import { ModelPicker } from './ModelPicker';
-import { Select } from '../components/Select';
+import { ClaudeModelPicker } from './ClaudeModelPicker';
 import { CLAUDE_MODES, claudeModelOptions } from '../lib/claudeCode';
 import { SLASH_COMMANDS, GROUP_LABELS, CLAUDE_ALIASES, claudeSlashCommands } from './slashCommands';
 import { prepareOrchestrate } from '../store/orchStore';
 import { useDraftStore, EMPTY_DRAFT, setDraftText, setDraftImages, setDraftMentions } from '../store/draftStore';
 import { Switch } from '../components/Switch';
 import { ClaudeMark } from '../components/Logo';
-import { EffortSlider } from './EffortSlider';
 import { ComposerQuota } from './ComposerQuota';
 import { ProgressRing } from '../components/Ring';
 import {
@@ -62,7 +62,7 @@ function readImage(file) {
   });
 }
 
-export function ChatInputBar() {
+export function ChatInputBar({ placeholder } = {}) {
   const draftKey = useSessionsStore((s) => s.activeKey);
   const draft = useDraftStore((s) => s.drafts[draftKey]) || EMPTY_DRAFT;
   const { text, images, mentions } = draft; // images: { name, dataUrl, base64 } · mentions: { name, path, rel }
@@ -385,7 +385,7 @@ export function ChatInputBar() {
         <div className="chat-inputbar__chips">
           {mentions.map((m) => (
             <span key={m.path} className="ctx-chip" title={m.rel}>
-              <IconFileCode size={13} />
+              <FileIcon nombre={m.path} size={16} />
               @{m.name}
               <button
                 onClick={() => setMentions((prev) => prev.filter((x) => x.path !== m.path))}
@@ -415,7 +415,7 @@ export function ChatInputBar() {
               onPointerEnter={() => setMentionSel(i)}
               onMouseDown={(e) => { e.preventDefault(); pickMention(f); }}
             >
-              <IconFileCode size={13} />
+              <FileIcon nombre={f.path} size={16} />
               <span className="mention-menu__name">{f.name}</span>
               <span className="mention-menu__rel">{f.rel}</span>
             </div>
@@ -436,13 +436,7 @@ export function ChatInputBar() {
       <textarea
         ref={textareaRef}
         className="chat-inputbar__textarea"
-        placeholder={isClaude ? (!agentActive ? 'Abre una carpeta de trabajo para usar Claude Code'
-          : streaming ? 'Claude está trabajando: lo que envíes queda en cola, /btw para preguntar al margen'
-            : 'Pídele algo a Claude Code, @ para mencionar un archivo')
-          : !agentActive ? 'Pregunta lo que quieras, / para comandos'
-          : chatMode === 'plan' ? 'Describe qué quieres hacer y el agente propondrá un plan'
-            : chatMode === 'ask' ? 'Pregunta sobre el código, @ para mencionar un archivo'
-              : 'Pide algo, @ para mencionar un archivo, / para comandos'}
+        placeholder={isClaude && !agentActive ? 'Abre una carpeta de trabajo para usar Claude Code' : placeholder || 'Responde o pide un cambio…'}
         rows={1}
         value={text}
         onChange={onChange}
@@ -452,6 +446,7 @@ export function ChatInputBar() {
       />
 
       <div className="chat-inputbar__row">
+        <button className="ic chat-inputbar__attach" onClick={() => fileInputRef.current?.click()} title="Adjuntar imagen (o pega con Ctrl+V)"><IconClip size={15} /></button>
         {isClaude && (
           <span className="chat-inputbar__engine" title="Estás hablando con Claude Code">
             <ClaudeMark size={12} /><span className="chat-inputbar__engine-lbl">Claude Code</span>
@@ -514,17 +509,11 @@ export function ChatInputBar() {
         </div>
 
         {isClaude
-          ? <Select up className="modelpicker modelpicker--claude" value={ccModel} onChange={setCcModel} options={modelOptions} title="Modelo de Claude Code" />
+          ? <ClaudeModelPicker value={ccModel} onChange={setCcModel} options={modelOptions} levels={effortLevels} effort={ccEffort} onEffort={setCcEffort} />
           : <ModelPicker />}
-        {isClaude && effortLevels.length > 0 && (
-          <EffortSlider levels={effortLevels} value={ccEffort} onChange={setCcEffort} />
-        )}
 
         <div className="chat-inputbar__fill" />
 
-        <button className="ic" onClick={() => fileInputRef.current?.click()} title="Adjuntar imagen (o pega con Ctrl+V)">
-          <IconClip size={15} />
-        </button>
         {workspaceRoot && (
           <button className="ic chat-inputbar__at" onClick={insertAt} title="Mencionar un archivo (@)">
             <IconAt size={15} />

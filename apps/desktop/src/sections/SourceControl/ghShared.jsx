@@ -5,8 +5,8 @@ import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownComponents, REMARK } from '../../chat/ChatMarkdown';
 import { openExternal } from '../../lib/tauri';
-import { SpinRing } from '../../components/Ring';
-import { IconCheck, IconX } from '../../components/Icons';
+import { IconCheck } from '../../components/Icons';
+import { StatusIcon as SharedStatusIcon } from '@lixbon/icons/status';
 
 export const STATE_TEXT = {
   ok: 'Correcto', fail: 'Falló', running: 'En curso', queued: 'En cola', cancel: 'Cancelado', skip: 'Omitido', idle: '—',
@@ -14,16 +14,8 @@ export const STATE_TEXT = {
 
 /** Estado de un check, una ejecución, un job o un paso. */
 export function StatusIcon({ state, size = 16 }) {
-  const glyph = Math.round(size * 0.62);
-  if (state === 'running') return <span className="ghst ghst--running" style={{ width: size, height: size }}><SpinRing size={size - 4} /></span>;
-  return (
-    <span className={`ghst ghst--${state}`} style={{ width: size, height: size }} title={STATE_TEXT[state]}>
-      {state === 'ok' && <IconCheck size={glyph} />}
-      {state === 'fail' && <IconX size={glyph} />}
-      {state === 'cancel' && <svg width={glyph} height={glyph} viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>}
-      {state === 'skip' && <svg width={glyph} height={glyph} viewBox="0 0 24 24" aria-hidden="true"><path d="M7 12h10" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>}
-    </span>
-  );
+  const kind = { running: 'working', ok: 'done', fail: 'failed', cancel: 'paused', skip: 'paused', queued: 'paused', idle: 'paused' }[state] || 'paused';
+  return <span className={`ghst ghst--${state} ghst--shared`} title={STATE_TEXT[state]}><SharedStatusIcon kind={kind} size={size} /></span>;
 }
 
 export function duration(secs) {
