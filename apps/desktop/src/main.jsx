@@ -6,6 +6,7 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "@lixbon/fonts/sans.css";
 import "@lixbon/fonts/serif-variable.css";
+import "@lixbon/fonts/tokens.css";
 import "@fontsource-variable/jetbrains-mono";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/base.css";

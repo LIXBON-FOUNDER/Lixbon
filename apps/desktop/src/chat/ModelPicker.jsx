@@ -3,11 +3,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Popover } from '../components/Popover';
 import { IconCheck, IconChevronDown } from '../components/Icons';
 import { LogoMark } from '../components/Logo';
+import { ProviderMark } from '../orch/agent/ProviderMark';
 import { useSessionsStore } from '../store/chatStore';
 import { useModelReasoning, reasoningLevels, REASONING_LABELS } from './modelReasoning';
 import { useAppStore } from '../store/appStore';
 import { api } from '../lib/api';
 import { fetchModelRoles, roleModel, usableModels } from '../lib/modelRoles';
+
+function ModelMark({ model, size = 16 }) {
+  const provider = typeof model?.provider === 'string' ? model.provider : typeof model?.owned_by === 'string' ? model.owned_by : null;
+  return provider ? <ProviderMark provider={provider.toLowerCase()} size={size} /> : <LogoMark size={size} />;
+}
 
 export function ModelPicker() {
   const {
@@ -89,13 +95,13 @@ export function ModelPicker() {
   };
   return <>
     <button ref={selectRef} className="modelchip" aria-label="Modelo y razonamiento" aria-haspopup="menu" aria-expanded={open} onClick={(event) => { setKeyboard(event.detail === 0); setOpen((value) => !value); }}>
-      {currentModel}<span className="modelchip__level"> · {levels.length ? REASONING_LABELS[levels.includes(reasoning) ? reasoning : 'auto'] : 'Auto'}</span><IconChevronDown size={12} />
+      <ModelMark model={info} />{currentModel}<span className="modelchip__level"> · {levels.length ? REASONING_LABELS[levels.includes(reasoning) ? reasoning : 'auto'] : 'Auto'}</span><IconChevronDown size={12} />
     </button>
     <Popover anchorRef={selectRef} open={open} onClose={close} below={false} className={`modelmenu ${keyboard ? 'is-keyboard' : ''}`}>
       <div ref={menuRef} role="menu" aria-label="Modelo y razonamiento" onKeyDown={onMenuKey}>
         <div className="modelmenu__head">Modelo</div>
         {availableModels.map((model) => <button key={model.id} role="menuitemradio" aria-checked={model.id === currentModel} tabIndex={model.id === currentModel ? 0 : -1} className={`modelmenu__item ${model.id === currentModel ? 'is-active' : ''}`} onClick={() => setCurrentModel(model.id)}>
-          <LogoMark size={18} /><span><span className="modelmenu__name">{model.id}</span>{capabilities(model) && <span className="modelmenu__description">{capabilities(model)}</span>}</span>{model.id === currentModel && <IconCheck size={14} />}
+          <ModelMark model={model} size={18} /><span><span className="modelmenu__name">{model.id}</span>{capabilities(model) && <span className="modelmenu__description">{capabilities(model)}</span>}</span>{model.id === currentModel && <IconCheck size={14} />}
         </button>)}
         <div className="modelmenu__reason"><span>Razonamiento</span><span>{levels.length ? REASONING_LABELS[levels.includes(reasoning) ? reasoning : 'auto'] : 'No disponible'}</span></div>
         {levels.length > 0 && <div className="modelmenu__levels">{levels.map((level) => <button key={level} role="menuitemradio" aria-checked={reasoning === level} tabIndex={-1} className={reasoning === level ? 'is-active' : ''} onClick={() => setReasoning(key, level)}>{REASONING_LABELS[level]}</button>)}</div>}

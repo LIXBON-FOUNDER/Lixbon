@@ -941,7 +941,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
         </div>
       )}
       <div className="wb wb--orch ade__layout">
-      <AdeActivityRail view={workspaceView} onSelect={changeWorkspaceView} hostsAvailable onIntegrations={() => changeWorkspaceView('integrations')} />
+      <AdeActivityRail view={workspaceView === 'workspace' && inspectorTab === 'changes' ? 'review' : workspaceView} onSelect={(view) => { if (view === 'review') { setInspectorTab('changes'); changeWorkspaceView('workspace'); } else { if (view === 'workspace') setInspectorTab('task'); changeWorkspaceView(view); } }} hostsAvailable onIntegrations={() => changeWorkspaceView('integrations')} />
       <Collapse open={leftOpen && !['hosts', 'integrations'].includes(workspaceView)} size={Math.max(sizes.side, 240) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead"><span className="panelhead__title">Trabajo</span><span className="panelhead__fill" /><NewAttemptForm projectId={selectedProjectId} projectName={selectedProjectName} coreModel={coreModel} active={workspaceActive} triggerLabel="Nueva tarea" onCreated={({projectId, taskId, attemptId}) => attemptId ? selectAttempt({projectId, taskId, attemptId}) : selectTask({projectId, taskId})} /></div>

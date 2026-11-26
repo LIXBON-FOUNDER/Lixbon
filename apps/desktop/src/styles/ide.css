@@ -20,9 +20,9 @@ html[data-ui='ide'] {
   --text-chat: 15px;
   --text-input: 16px;
   --weight-title: 500;
-  --font-ui: 'Lixbon Brand Sans', system-ui, sans-serif;
+  --font-ui: var(--lixbon-font-sans);
   --font-interface: var(--font-ui);
-  --font-display: 'Lixbon Brand Serif', Georgia, serif;
+  --font-display: var(--lixbon-font-serif);
   --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', Consolas, monospace;
   --danger-action: #CF3A20;
   --x-ref: #C9A6F5;

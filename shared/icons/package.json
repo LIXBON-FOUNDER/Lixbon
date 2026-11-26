@@ -26,7 +26,8 @@
       "react-native": "./native/StatusIcon.js",
       "default": "./status/index.js"
     },
-    "./status/css": "./status/status.css"
+    "./status/css": "./status/status.css",
+    "./brands": "./brands/index.jsx"
   },
   "sideEffects": [
     "*.css",

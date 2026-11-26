@@ -1,3 +1,4 @@
+import { BrandIcon } from '@lixbon/icons/brands';
 // Marca aprobada en los lienzos: rombo con destello calado.
 
 /** Animación del icono según lo que hace el agente: leer y buscar refractan
@@ -43,12 +44,5 @@ export function TeamMark({ size = 18, className = '' }) {
 }
 
 export function ClaudeMark({ size = 16, className = '' }) {
-  const rays = Array.from({ length: 8 }, (_, i) => i * 22.5 * 2);
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" className={`claudemark ${className}`}>
-      {rays.map((deg) => (
-        <rect key={deg} x="14.6" y="3" width="2.8" height="26" rx="1.4" fill="#D97757" transform={`rotate(${deg} 16 16)`} />
-      ))}
-    </svg>
-  );
+  return <BrandIcon name="claude" size={size} className={`claudemark ${className}`} />;
 }
