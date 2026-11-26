@@ -8,7 +8,7 @@ import { useWorkbenchStore } from '../../store/workbenchStore';
 import { githubSlug } from '../../lib/githubSlug';
 import { openExternal } from '../../lib/tauri';
 import { showConfirm } from '../../lib/confirm';
-import { ghStatus, listPrs, viewPr, reviewComments, mergePr, checkState } from '../../lib/github';
+import { ghStatus, listPrs, viewPr, reviewComments, mergePr, enablePrAutoMerge, disablePrAutoMerge, checkState } from '../../lib/github';
 import { Segmented } from '../../components/Segmented';
 import { SpinRing } from '../../components/Ring';
 import { LogoMark } from '../../components/Logo';
@@ -66,12 +66,13 @@ function askAgent(text) {
   useChatStore.getState().send(text);
 }
 
-function PrDetail({ number, slug, onChanged, onOpenRun }) {
+function PrDetail({ number, slug, onChanged, onOpenRun, compact = false }) {
   const [pr, setPr] = useState(null);
   const [comments, setComments] = useState([]);
   const [error, setError] = useState('');
   const [merging, setMerging] = useState(false);
   const [method, setMethod] = useState('squash');
+  const [actionError, setActionError] = useState('');
 
   const load = useCallback(async () => {
     setError('');
@@ -115,6 +116,7 @@ function PrDetail({ number, slug, onChanged, onOpenRun }) {
       options: [{ id: 'yes', label: 'Fusionar', kind: 'primary' }, { id: 'cancel', label: 'Cancelar' }],
     });
     if (choice !== 'yes') return;
+    setActionError('');
     setMerging(true);
     try {
       await mergePr(pr.number, method);
@@ -122,13 +124,35 @@ function PrDetail({ number, slug, onChanged, onOpenRun }) {
       onChanged();
       useGitStore.getState().refresh();
     } catch (e) {
-      setError(String(e.message || e));
+      setActionError(String(e.message || e));
     } finally {
       setMerging(false);
     }
   };
 
-  return (
+  const toggleAutoMerge = async () => {
+    const enabled = !!pr.autoMergeRequest;
+    const { choice } = await showConfirm({
+      title: enabled ? `Cancelar fusión automática #${pr.number}` : `Fusionar cuando pasen #${pr.number}`,
+      message: enabled
+        ? 'El pull request seguirá abierto. GitHub dejará de fusionarlo automáticamente.'
+        : `${pr.headRefName} → ${pr.baseRefName} mediante ${method}. GitHub lo fusionará cuando se cumplan los requisitos de la rama; si ya se cumplen, puede fusionarlo ahora.`,
+      options: [{ id: 'yes', label: enabled ? 'Cancelar fusión automática' : 'Activar fusión automática', kind: 'primary' }, { id: 'cancel', label: 'Volver' }],
+    });
+    if (choice !== 'yes') return;
+    setMerging(true);
+    setActionError('');
+    try {
+      if (enabled) await disablePrAutoMerge(pr.number);
+      else await enablePrAutoMerge(pr.number, method, pr.headRefOid);
+      await load();
+      onChanged();
+      useGitStore.getState().refresh();
+    } catch (e) { setActionError(String(e.message || e)); }
+    finally { setMerging(false); }
+  };
+
+  const detailedContent = (
     <div className="ghd scroll">
       <div className="ghd__main">
         <div className="ghd__head rise">
@@ -269,6 +293,46 @@ function PrDetail({ number, slug, onChanged, onOpenRun }) {
       </aside>
     </div>
   );
+  if (!compact) return <>{actionError && <p role="alert" className="scm2__error ghpr__error">{actionError}</p>}{detailedContent}</>;
+  const open = st === 'open';
+  return (
+    <section className="ghpr" aria-label={`Pull request #${pr.number}`}>
+      <div className="ghpr__scroll scroll">
+        <header className="ghpr__head">
+          <strong>Pull request #{pr.number}</strong>
+          <span className={`ghpr__state is-${running ? 'running' : failing ? 'fail' : 'ok'}`}>
+            <StatusIcon state={running ? 'running' : failing ? 'fail' : open && checks.length ? 'ok' : 'idle'} size={14} />
+            {running ? 'Comprobando' : failing ? 'Con fallos' : st === 'draft' ? 'Borrador' : STATE_LABEL[pr.state] || pr.state}
+          </span>
+        </header>
+        <h2 className="ghpr__title">{pr.title}</h2>
+        <p className="ghpr__meta">{pr.headRefName} → {pr.baseRefName} · {pr.commits?.length || 0} commits</p>
+        <section className="ghpr__section" aria-label="Comprobaciones">
+          <h3>Comprobaciones{checks.length ? ` · pasan ${passed} de ${checks.length}` : ''}</h3>
+          {checks.length === 0 && <p className="scm2__muted">Sin comprobaciones publicadas.</p>}
+          {checks.map((c, i) => <button type="button" key={`${c.name}-${i}`} className={`ghpr__check is-${c.state}`} disabled={!c.url && !(c.runId && onOpenRun)} onClick={() => c.runId && onOpenRun ? onOpenRun(c.runId) : openExternal(c.url)}>
+            <StatusIcon state={c.state} size={14} /><span>{c.name}</span>
+          </button>)}
+        </section>
+        <section className="ghpr__section" aria-label="Revisión">
+          <h3>Revisión</h3>
+          <div className="ghpr__review"><LogoMark size={14} /><span>{comments.length ? `${comments.length} ${comments.length === 1 ? 'comentario de revisión' : 'comentarios de revisión'}` : 'Sin comentarios de revisión'}</span></div>
+          {Array.from(byReviewer, ([name, state]) => <p key={name} className="ghpr__reviewer">{name} · {REVIEW_LABEL[state] || state}</p>)}
+        </section>
+        <details className="ghpr__details"><summary>Descripción, comentarios y opciones</summary>{detailedContent}</details>
+        {pr.mergeable === 'CONFLICTING' && <p className="scm2__error">Hay conflictos con la rama base.</p>}
+        {pr.autoMergeRequest && <p className="ghpr__auto" role="status">Fusión automática activada · {pr.autoMergeRequest.mergeMethod || method}</p>}
+        {actionError && <p role="alert" className="scm2__error">{actionError}</p>}
+      </div>
+      <footer className="ghpr__footer">
+        <button type="button" className="btn" onClick={() => openExternal(pr.url)}>Abrir en GitHub</button>
+        {(open || pr.autoMergeRequest) && <button type="button" className="btn btn--primary" onClick={toggleAutoMerge} disabled={merging || (!pr.autoMergeRequest && pr.mergeable === 'CONFLICTING')}>
+          {merging && <SpinRing size={12} />}{pr.autoMergeRequest ? 'Cancelar fusión automática' : 'Fusionar cuando pasen'}
+        </button>}
+        <button type="button" className="iconbtn" title="Actualizar pull request" aria-label="Actualizar pull request" onClick={load}><IconRefresh size={14} /></button>
+      </footer>
+    </section>
+  );
 }
 
 function PublicView() {
@@ -302,7 +366,7 @@ function PublicView() {
   );
 }
 
-export function GitHubView({ onOpenRun }) {
+export function GitHubView({ onOpenRun, compact = false }) {
   const { remoteUrl, branch } = useGitStore();
   const slug = githubSlug(remoteUrl);
   const [status, setStatus] = useState(null);
@@ -344,8 +408,9 @@ export function GitHubView({ onOpenRun }) {
   }
 
   return (
-    <div className="ghlayout">
-      <div className="ghlist">
+    <div className={`ghlayout${compact ? ' ghlayout--compact' : ''}`}>
+      {compact && <details className="ghcompact-list"><summary>Otros pull requests</summary><div className="ghlist__bar"><Segmented size="sm" width={72} value={filter} onChange={setFilter} options={[{value:'open',label:'Abiertos'},{value:'closed',label:'Cerrados'}]} /></div>{prs?.map((p) => <button type="button" key={p.number} className="ghcompact-list__item" onClick={() => setSelected(p.number)}>#{p.number} · {p.title}</button>)}{error && <p className="scm2__error">{error}</p>}</details>}
+      <div className={`ghlist${compact ? ' ghlist--retained' : ''}`} hidden={compact}>
         <div className="ghlist__bar">
           <Segmented size="sm" width={72} value={filter} onChange={setFilter} options={[{ value: 'open', label: 'Abiertos' }, { value: 'closed', label: 'Cerrados' }]} />
         </div>
@@ -365,7 +430,7 @@ export function GitHubView({ onOpenRun }) {
           );
         })}
       </div>
-      {selected ? <PrDetail key={selected} number={selected} slug={slug} onChanged={loadList} onOpenRun={onOpenRun} /> : <div className="ghd__empty">Elige un pull request.</div>}
+      {selected ? <PrDetail compact={compact} key={selected} number={selected} slug={slug} onChanged={loadList} onOpenRun={onOpenRun} /> : <div className="ghd__empty">Elige un pull request.</div>}
     </div>
   );
 }

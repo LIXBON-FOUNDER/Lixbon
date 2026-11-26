@@ -15,6 +15,8 @@ import { SourceControl } from '../sections/SourceControl/SourceControl';
 import { DiffView } from '../sections/SourceControl/DiffView';
 import { GitHubView } from '../sections/SourceControl/GitHubView';
 import { ActionsView } from '../sections/SourceControl/ActionsView';
+import { ActivityRail } from './ActivityRail';
+import { FileIcon } from '@lixbon/icons/file-icons';
 
 const readMode = () => { try { return localStorage.getItem('lx_diff_mode') || 'inline'; } catch { return 'inline'; } };
 
@@ -55,7 +57,8 @@ export function GitMode() {
 
   return (
     <div className="wb wb--git">
-      <Collapse open={open} size={Math.max(sizes.side, 300) + 8}>
+      <ActivityRail />
+      <Collapse open={open} size={Math.max(sizes.side, 240) + 8}>
         <Panel id="scm" className="sidepanel">
           <SourceControl selected={meta} onSelect={() => setTab('diff')} onOpenPr={() => setTab('pr')} />
         </Panel>
@@ -63,30 +66,28 @@ export function GitMode() {
       </Collapse>
       <Panel id="diff" className="wb__grow gitmain">
         <div className="panelhead">
-          <Segmented
-            value={tab}
-            onChange={setTab}
-            width={104}
-            options={[{ value: 'diff', label: 'Cambios' }, { value: 'pr', label: 'Pull requests' }, { value: 'actions', label: 'Actions' }]}
-          />
-          {tab === 'diff' && diffData && <span className="mono panelhead__meta">{diffData.title}</span>}
+          <span className="gitmain__filetab">{tab === 'diff' && meta?.path && <FileIcon nombre={meta.path} size={16} />}{tab === 'diff' ? (diffData?.title.split('/').pop() || 'Cambios') : tab === 'pr' ? 'Pull requests' : 'GitHub Actions'}</span>
           <div className="panelhead__fill" />
-          {tab === 'diff' && diffData && (
-            <>
+          <details className="gitmain__options">
+            <summary>Opciones</summary>
+            <div>
+              <Segmented value={tab} onChange={setTab} width={104} options={[{value:'diff',label:'Cambios'},{value:'pr',label:'Pull requests'},{value:'actions',label:'Actions'}]} />
+              {tab === 'diff' && diffData && <>
               {meta?.path && !meta.staged && !meta.untracked && (
                 <button className="lk is-danger" onClick={async () => { await discard(meta.path, false); await reopen(meta.path, false); }}>Descartar</button>
               )}
               {meta?.path && <button className="lk" onClick={toggleStage}>{meta.staged ? 'Quitar de preparados' : 'Preparar'}</button>}
               {meta?.path && <button className="lk" onClick={openInEditor}>Abrir</button>}
-              <Segmented
+              </>}
+            </div>
+          </details>
+          {tab === 'diff' && diffData && <Segmented
                 size="sm"
                 value={viewMode}
                 onChange={changeView}
                 width={84}
                 options={[{ value: 'inline', label: 'Unificado' }, { value: 'split', label: 'Lado a lado' }]}
-              />
-            </>
-          )}
+              />}
         </div>
         <div className="gitmain__body scroll">
           {tab === 'diff'
@@ -99,7 +100,7 @@ export function GitMode() {
       <RightDock open={rightOpen}>
         <div className="gitdock">
           <div className="panelhead"><Segmented size="sm" width={112} value={rightTab} onChange={setRightTab} options={[{value: 'pr', label: 'Pull request'}, {value: 'agent', label: 'Agente'}]} /></div>
-          {rightTab === 'pr' ? <div className="gitdock__pr"><GitHubView onOpenRun={(id) => { setRunId(id); setTab('actions'); }} /></div> : <AgentPanel onClose={toggleAgent} />}
+          {rightTab === 'pr' ? <div className="gitdock__pr"><GitHubView compact onOpenRun={(id) => { setRunId(id); setTab('actions'); }} /></div> : <AgentPanel onClose={toggleAgent} />}
         </div>
       </RightDock>
     </div>

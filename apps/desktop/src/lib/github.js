@@ -8,7 +8,7 @@ const PR_LIST_FIELDS = 'number,title,author,headRefName,baseRefName,state,isDraf
 const PR_VIEW_FIELDS = [
   'number', 'title', 'body', 'author', 'headRefName', 'baseRefName', 'state', 'isDraft', 'mergeable',
   'reviewDecision', 'reviews', 'reviewRequests', 'labels', 'statusCheckRollup', 'commits', 'files', 'url',
-  'closingIssuesReferences', 'additions', 'deletions', 'mergedAt', 'createdAt',
+  'closingIssuesReferences', 'additions', 'deletions', 'mergedAt', 'createdAt', 'autoMergeRequest', 'headRefOid',
 ].join(',');
 const RUN_FIELDS = 'databaseId,number,attempt,displayTitle,name,workflowName,workflowDatabaseId,status,conclusion,event,headBranch,headSha,createdAt,startedAt,updatedAt,url';
 
@@ -63,6 +63,13 @@ export async function reviewComments(slug, number) {
 }
 
 export const mergePr = (number, method) => gh(['pr', 'merge', num(number), `--${['squash', 'merge', 'rebase'].includes(method) ? method : 'squash'}`], 60000);
+
+/** La acción exige confirmación en el IDE; GitHub aplica las reglas de la rama. */
+export const enablePrAutoMerge = (number, method, head) => gh([
+  'pr', 'merge', num(number), '--auto', `--${['squash', 'merge', 'rebase'].includes(method) ? method : 'squash'}`,
+  ...(head ? ['--match-head-commit', head] : []),
+], 60000);
+export const disablePrAutoMerge = (number) => gh(['pr', 'merge', num(number), '--disable-auto'], 60000);
 
 export const prDiff = (number) => gh(['pr', 'diff', num(number)], 30000);
 
