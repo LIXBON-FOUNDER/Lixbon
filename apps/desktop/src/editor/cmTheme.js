@@ -4,16 +4,17 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 
 const PALETTES = {
+  // .x-sk/.x-ss/.x-sy/.x-sn/.x-sc del exportado IdeNuevoEditor.dc.html.
   dark: {
-    comment: '#5E5E59',
-    keyword: '#E59AD6',
-    string: '#F2C98A',
+    comment: '#7A7A7A',
+    keyword: '#D4A5F5',
+    string: '#B4C64E',
     fn: '#8EC5FF',
-    type: '#C3B4FF',
-    number: '#F5D98A',
+    type: '#F0B46B',
+    number: '#EBC06A',
     tag: '#93DDA3',
     invalid: '#F08C7C',
-    accentRgb: '198, 214, 110',
+    accentRgb: '255, 255, 255',
     searchRgb: '232, 200, 114',
   },
   light: {
@@ -42,7 +43,7 @@ const buildTheme = (mode) => {
   return EditorView.theme(
   {
     '&': { height: '100%', backgroundColor: 'transparent', color: C.ink },
-    '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.6' },
+    '.cm-scroller': { fontFamily: 'var(--font-mono)', fontWeight: '400', fontVariantLigatures: 'none', lineHeight: String(23 / 13) },
     '.cm-content': { caretColor: C.ink, padding: '6px 0 40vh' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: C.ink, borderLeftWidth: '2px' },
     '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
@@ -92,7 +93,7 @@ const buildHighlight = (mode) => {
     { tag: [t.propertyName, t.attributeValue], color: C.body },
     { tag: [t.attributeName], color: P.type },
     { tag: [t.tagName, t.angleBracket], color: P.tag },
-    { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: P.comment, fontStyle: 'italic' },
+    { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: P.comment, fontStyle: 'normal' },
     { tag: [t.operator, t.punctuation, t.separator, t.bracket], color: C.muted },
     { tag: [t.heading], color: C.ink, fontWeight: '600' },
     { tag: [t.link, t.url], color: P.fn, textDecoration: 'underline' },

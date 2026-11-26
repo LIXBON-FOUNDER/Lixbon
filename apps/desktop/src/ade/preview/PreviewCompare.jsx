@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // PreviewCompare.jsx — Intentos de la MISMA Task con el MISMO ContextPackage, lado a lado.
 // Arriba el resumen (cifras y decisión, siempre a la vista); abajo la exploración con scroll propio.
 // «Componer»: en vez de elegir un ganador entero, tomar cada archivo del Intento que lo hizo mejor
@@ -37,6 +38,18 @@ function deltas(a, b) {
 }
 
 const filesOf = (s, a) => REVIEW_FILES[a.id] || timelineOf(s, a).filter((e) => e.kind === 'edits').flatMap((e) => e.files);
+
+export function CompareFiles() {
+  const state = usePreviewStore();
+  const attempt = attemptById(state, state.sel.attemptId);
+  if (!attempt) return null;
+  const attempts = attemptsOfTask(state, attempt.taskId);
+  const paths = [...new Set(attempts.flatMap((item) => filesOf(state, item).map((file) => file.path)))];
+  return <div className="pv-context-files"><p>{paths.length} archivos cambiados entre los intentos</p>{paths.map((path) => {
+    const entries = attempts.flatMap((item) => { const file = filesOf(state, item).find((entry) => entry.path === path); return file ? [{...file, label: item.label}] : []; });
+    return <div className="pv-context-file" key={path}><FileIcon nombre={path} size={16} /><span><b title={path}>{path.split('/').pop()}</b><small>{entries.length > 1 ? entries.map((item) => item.label).join(' y ') : `solo ${entries[0].label}`}</small></span><small className="pv-good">+{entries.reduce((sum, item) => sum + item.add, 0)}</small><small className="pv-bad">−{entries.reduce((sum, item) => sum + item.del, 0)}</small></div>;
+  })}</div>;
+}
 
 function Compose({ atts, s, task }) {
   const byPath = useMemo(() => {
@@ -124,11 +137,25 @@ export function PreviewCompare() {
   return (
     <div className="pv-cmp">
       <header className="pv-view__head">
-        <h1 className="pv-view__title">Comparar Intentos · {task.title}</h1>
+        <h1 className="pv-view__title">{task.title}</h1>
         <span className="pv-tag pv-tone-done">Mismo ContextPackage {atts[0].ctx}</span>
         <span className="pv-muted">{running ? 'Comparación provisional · hay Intentos en marcha' : 'Compara la evidencia antes de elegir'}</span>
       </header>
-      <section className="pv-cmp__top" aria-label="Resumen de la comparación">
+      <p className="pv-cmp__subtitle">{atts.length === 2 ? 'Dos intentos' : `${atts.length} intentos`} sobre el mismo objetivo</p>
+      <section className="pv-compare-cards" aria-label="Resumen de la comparación">
+        {atts.map((a) => <article key={a.id} className={`pv-compare-card${s.choice[task.id] === a.id ? ' is-chosen' : ''}`}>
+          <header><Agent attempt={a} detail={false} size={20} /><span className="pv-muted">{a.label}</span><span className="panelhead__fill" /><StatePill attempt={a} /></header>
+          <dl>
+            <div><dt>Pruebas</dt><dd>{a.tests ? `${a.tests.pass} de ${a.tests.total}` : 'No informado'}</dd></div>
+            {a.tests?.total > 0 && <div className={`pv-compare-progress ${a.tests.pass < a.tests.total ? 'has-failures' : ''}`}><span style={{width: `${Math.max(0, Math.min(100, a.tests.pass / a.tests.total * 100))}%`}} /></div>}
+            <div><dt>Cambios</dt><dd>{a.files} archivos <span className="pv-good">+{a.add}</span> <span className="pv-bad">−{a.del}</span></dd></div>
+            <div><dt>Coste</dt><dd>{money(a.cost)} · {a.minutes} min</dd></div>
+          </dl>
+          <p>{APPROACH[a.id] || a.latest || 'No informado'}</p>
+          <button type="button" className={`btn btn--sm ${s.choice[task.id] === a.id ? 'btn--primary' : 'btn--ghost'}`} onClick={() => s.choose(task.id, a.id)}>{s.choice[task.id] === a.id ? `Elegido ${a.label}` : `Elegir ${a.label}`}</button>
+        </article>)}
+      </section>
+      <details className="pv-comparison-details"><summary>Métricas y riesgos detallados</summary><section className="pv-cmp__top" aria-label="Métricas detalladas">
         <div className="pv-cmp__grid" style={{ gridTemplateColumns: `112px repeat(${atts.length}, minmax(0, 1fr))` }}>
           <div />
           {atts.map((a) => (
@@ -150,7 +177,7 @@ export function PreviewCompare() {
             </div>
           ))}
         </div>
-      </section>
+      </section></details>
       <section className="pv-cmp__explore" aria-label="Explorar la comparación">
         <div className="pv-cmp__bar">
           <Tabs value={pane} onChange={setPane} label="Explorar" options={[{ id: 'diff', label: 'Diferencias' }, { id: 'compose', label: 'Componer' }, { id: 'risks', label: 'Riesgos' }, { id: 'evidence', label: 'Evidencia' }]} />
@@ -164,7 +191,7 @@ export function PreviewCompare() {
               <section key={a.id} className="pv-cmp__card">
                 <h3>Intento {a.label} · enfoque</h3>
                 <p>{APPROACH[a.id] || 'El resumen del enfoque llega cuando el Intento termine.'}</p>
-                <ul className="pv-insp__files">{filesOf(s, a).map((f) => <li key={f.path}>{f.risk && <span className={`pv-riskdot pv-riskdot--${f.risk}`} />}<span className="mono pv-trunc">{f.path}</span><span className="pv-good mono">+{f.add}</span><span className="pv-bad mono">−{f.del}</span></li>)}</ul>
+                <ul className="pv-insp__files">{filesOf(s, a).map((f) => <li key={f.path}>{f.risk && <span className={`pv-riskdot pv-riskdot--${f.risk}`} />}<FileIcon nombre={f.path} size={16} /><span className="mono pv-trunc">{f.path}</span><span className="pv-good mono">+{f.add}</span><span className="pv-bad mono">−{f.del}</span></li>)}</ul>
                 {atts.length === 2 && i === 1 && <p className="pv-cmp__delta"><b>B frente a A:</b> {deltas(atts[0], atts[1]).join(' · ') || 'sin diferencia medible todavía'}</p>}
               </section>
             )} />

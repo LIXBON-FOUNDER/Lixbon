@@ -22,7 +22,7 @@ export function PreviewStatusUsage() {
     <button key={u.provider} type="button" className="statusbar__item pv-status__use" onClick={() => setView('usage')} title={`${providerName(u.provider)} · ${u.pct}% de la ${u.windowLabel} · se reinicia en ${u.reset}`}>
       <span>{providerName(u.provider)}</span>
       <Meter pct={u.pct} />
-      <span className="mono">{u.pct}%</span>
+      <span className="mono">{u.pct} % usado</span>
     </button>
   ));
 }
@@ -34,7 +34,7 @@ export function PreviewStatusHosts() {
   return (
     <button type="button" className="statusbar__item pv-status__hosts" onClick={() => s.setView('hosts')} title={`Hosts · ${online} de ${s.hosts.length} conectados\n${detail}`}>
       <I n="server" size={13} />
-      Hosts
+      {online} de {s.hosts.length} hosts en línea
     </button>
   );
 }

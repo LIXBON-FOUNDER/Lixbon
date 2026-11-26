@@ -1,3 +1,4 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // PreviewUi.jsx — primitivas de la vista previa sobre las del producto (iconos, AgentChip).
 // La forma distingue el estado y el color lo refuerza; Attention vive en su propio eje.
 import {
@@ -19,30 +20,17 @@ const ICONS = {
 };
 
 export function I({ n, size = 14, ...rest }) {
+  const kind = { shield: 'permission', chat: 'question', eye: 'review', warn: 'attention', pr: 'review' }[n];
+  if (kind) return <StatusIcon kind={kind} size={size} {...rest} />;
   const C = ICONS[n];
   return C ? <C size={size} {...rest} /> : null;
 }
 
-const SHAPES = {
-  working: (<><circle className="pvmk-track" cx="8" cy="8" r="6.2" /><circle className="pvmk-arc" cx="8" cy="8" r="6.2" /></>),
-  thinking: (<><circle className="pvmk-dot pvmk-d1" cx="3.6" cy="8" r="1.5" /><circle className="pvmk-dot pvmk-d2" cx="8" cy="8" r="1.5" /><circle className="pvmk-dot pvmk-d3" cx="12.4" cy="8" r="1.5" /></>),
-  tool: (<><rect className="pvmk-ring" x="1.8" y="2.8" width="12.4" height="10.4" rx="2.6" /><path className="pvmk-glyph" d="M4.6 6l2.2 2-2.2 2" /><path className="pvmk-glyph pvmk-blink" d="M8.4 10.4h3" /></>),
-  waiting: (<><circle className="pvmk-ring" cx="8" cy="8" r="6.2" /><path className="pvmk-glyph" d="M8 4.6V8l2.2 1.4" /></>),
-  queued: (<circle className="pvmk-ring pvmk-dash" cx="8" cy="8" r="6.2" />),
-  review: (<><circle className="pvmk-fill pvmk-solid" cx="8" cy="8" r="6.4" /><path className="pvmk-glyph pvmk-inv" d="M4.2 8s1.5-2.6 3.8-2.6S11.8 8 11.8 8 10.3 10.6 8 10.6 4.2 8 4.2 8Z" /><circle className="pvmk-inv-fill" cx="8" cy="8" r="1.1" /></>),
-  failed: (<><circle className="pvmk-fill" cx="8" cy="8" r="6.6" /><path className="pvmk-glyph" d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" /></>),
-  done: (<><circle className="pvmk-fill" cx="8" cy="8" r="6.6" /><path className="pvmk-glyph" d="M4.9 8.2l2.1 2.1 4.2-4.5" /></>),
-  paused: (<><circle className="pvmk-fill" cx="8" cy="8" r="6.6" /><path className="pvmk-glyph" d="M6.3 5.6v4.8M9.7 5.6v4.8" /></>),
-  offline: (<><circle className="pvmk-ring" cx="8" cy="8" r="6.2" /><path className="pvmk-glyph" d="M3.8 12.2L12.2 3.8" /></>),
-};
-
+const STATUS_KIND = { thinking: 'working', tool: 'working', waiting: 'permission', queued: 'paused', offline: 'offline' };
 export function Mark({ attempt, kind, tone, size = 14 }) {
   const m = attempt ? meta(attempt) : { mark: kind, tone };
-  return (
-    <span className={`pvmk pv-tone-${m.tone}`} style={{ width: size, height: size }} data-mark={m.mark} aria-hidden="true">
-      <svg key={m.mark} viewBox="0 0 16 16" width={size} height={size}>{SHAPES[m.mark] || SHAPES.queued}</svg>
-    </span>
-  );
+  const state = attempt?.cause === 'answer' ? 'question' : attempt?.cause === 'network' ? 'network' : STATUS_KIND[m.mark] || m.mark;
+  return <span className={`pvmk pv-tone-${m.tone}`} data-mark={m.mark} aria-hidden="true"><StatusIcon kind={state} size={size} /></span>;
 }
 
 export function StatePill({ attempt }) {
@@ -59,7 +47,7 @@ export function AttnFlag({ n = 1, risk }) {
   const label = `${n} ${n === 1 ? 'espera' : 'esperan'} tu decisión`;
   return (
     <span className={`pv-attn${risk === 'high' ? ' is-high' : ''}`} title={label} aria-label={label}>
-      <b>!</b>{n > 1 && <span>{n}</span>}
+      <StatusIcon kind="attention" size={16} />{n > 1 && <span>{n}</span>}
     </span>
   );
 }
@@ -128,6 +116,7 @@ export function Tabs({ value, onChange, options, label, idPrefix }) {
             role="tab"
             id={idPrefix ? `${idPrefix}-tab-${o.id}` : undefined}
             aria-selected={selected}
+            aria-label={o.label}
             tabIndex={selected ? 0 : -1}
             className={`ade-view-switch__tab${selected ? ' is-active' : ''}`}
             onClick={() => onChange(o.id)}
