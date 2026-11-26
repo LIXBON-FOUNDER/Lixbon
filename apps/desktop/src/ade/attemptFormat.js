@@ -28,6 +28,9 @@ export function formatDurationMs(ms) {
 /** Hora que acompaña a un Attempt en listas: fin, inicio o creación, la primera que exista. */
 export const attemptTime = (attempt) => formatUtc(attempt?.ended_at) ?? formatUtc(attempt?.started_at) ?? formatUtc(attempt?.created_at);
 
+/** Rótulo visual del lienzo; los IDs y números del Core se conservan en títulos y detalles. */
+export const attemptLetter = (n) => Number.isInteger(n) && n >= 1 && n <= 26 ? String.fromCharCode(64 + n) : String(n ?? '?');
+
 /**
  * Nombre visible de una ruta (último segmento): la ruta es ubicación, no identidad, y nunca se
  * convierte en enlace. La ruta completa queda en `title` y en la acción «Copiar ruta».

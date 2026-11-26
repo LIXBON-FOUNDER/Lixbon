@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // SourceControl.jsx — panel izquierdo del modo Git: rama, mensaje de commit
 // (con propuesta del modelo), cambios preparados y sin preparar, historial y
 // el estado del pull request de la rama.
@@ -11,7 +12,7 @@ import { Popover } from '../../components/Popover';
 import { SpinRing } from '../../components/Ring';
 import { LogoMark } from '../../components/Logo';
 import {
-  IconGitBranch, IconRefresh, IconPlus, IconX, IconArrowDown, IconArrowUp, IconChevronDown, IconHistory, IconPullRequest,
+  IconGitBranch, IconRefresh, IconPlus, IconX, IconArrowDown, IconArrowUp, IconChevronDown, IconHistory, IconPullRequest, IconDots,
 } from '../../components/Icons';
 
 const fileName = (p) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
@@ -26,8 +27,8 @@ function Badge({ c }) {
 function FileRow({ c, active, stat, onOpen, onStage, onDiscard }) {
   return (
     <div className={`scm2__file ${active ? 'is-active' : ''}`}>
-      <button className="scm2__fileopen" onClick={onOpen} title={c.path}>
-        <Badge c={c} />
+      <button className="scm2__fileopen" onClick={onOpen} title={`${c.path} · ${c.untracked ? 'Sin seguimiento' : c.staged ? 'Preparado' : 'Sin preparar'} · ${c.staged ? c.index : c.wt}`}>
+        <FileIcon nombre={c.path} size={16} /><Badge c={c} />
         <span className="scm2__name">{fileName(c.path)}</span>
         <span className="mono scm2__dir">{dirName(c.path)}</span>
       </button>
@@ -184,6 +185,14 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
   return (
     <div className="scm2">
       <div className="panelhead">
+        <span className="panelhead__title">Cambios</span>
+        <div className="panelhead__fill" />
+        <button className="ic" onClick={refresh} disabled={loading} title="Actualizar cambios"><IconRefresh size={16} /></button>
+      </div>
+
+      <details className="scm2__operations">
+        <summary aria-label="Rama y sincronización" title="Rama y sincronización"><IconDots size={16} /></summary>
+        <div className="scm2__operationbar">
         <button ref={branchRef} className="scm2__branch" onClick={() => setBranchOpen((v) => !v)} title="Cambiar o crear rama">
           <IconGitBranch size={14} />
           <span className="mono">{branch || '—'}</span>
@@ -198,9 +207,11 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
             <button className="ic" onClick={() => (hasRemote ? run(fetch) : refresh())} disabled={loading} title={hasRemote ? 'Buscar cambios en el remoto (fetch)' : 'Refrescar'}><IconRefresh size={14} /></button>
             {hasRemote && <button className="ic" onClick={() => run(pull)} title="Traer (pull)"><IconArrowDown size={14} /></button>}
             {hasRemote && <button className="ic" onClick={() => run(push)} title="Subir (push)"><IconArrowUp size={14} /></button>}
+            <button className="btn btn--ghost" onClick={() => run(commitAndPush)} disabled={!canCommit || !hasRemote}>Commit y push</button>
           </>
         )}
-      </div>
+        </div>
+      </details>
 
       <div className="scm2__commit">
         <div className="scm2__msg">
@@ -212,15 +223,14 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey && canCommit) run(commit); }}
           />
-          <button className="lk scm2__gen" onClick={() => run(generateMessage)} disabled={generating || changes.length === 0}>
-            {generating ? <SpinRing size={11} /> : <LogoMark size={11} />} Generar mensaje
-          </button>
         </div>
         <div className="scm2__commitrow">
-          <button className="btn btn--primary" onClick={() => run(commit)} disabled={!canCommit} title="Ctrl ↵">Commit{staged.length ? ` (${staged.length})` : ''}</button>
-          <button className="btn btn--ghost" onClick={() => run(commitAndPush)} disabled={!canCommit || !hasRemote}>Commit y push</button>
+          <button className="btn btn--primary" onClick={() => run(commit)} disabled={!canCommit} title="Ctrl ↵">Hacer commit en {branch || 'la rama'}</button>
           {netLabel && <span className="scm2__muted">{netLabel}…</span>}
         </div>
+        <button className="lk scm2__gen" onClick={() => run(generateMessage)} disabled={generating || changes.length === 0}>
+          {generating ? <SpinRing size={16} /> : <LogoMark size={16} />} Escribir el mensaje con el agente
+        </button>
         {!hasRemote && (
           publishOpen ? (
             <div className="field field--strong drop-in">
@@ -248,7 +258,7 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
         )}
         <section className="scm2__group">
           <div className="scm2__grouphead">
-            <span>Cambios</span><span className="count">{unstaged.length}</span>
+            <span>Sin preparar</span><span className="count">{unstaged.length}</span>
             <div className="panelhead__fill" />
             {unstaged.length > 0 && <button className="lk" onClick={stageAll}>Preparar todos</button>}
           </div>

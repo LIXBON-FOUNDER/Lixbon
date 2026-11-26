@@ -1,18 +1,28 @@
+import { StatusIcon } from '@lixbon/icons/status';
 // PreviewFleet.jsx — Mapa, Hosts y Uso. La computación y el consumo son contexto de cada decisión,
 // no un panel financiero. El mapa es una vista avanzada para mucho paralelismo; no es el inicio.
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { providerName } from '../../orch/agent/agentIdentity';
 import { usePreviewStore, attemptsOfTask, hostCount } from './previewStore';
 import { EDGES, PROJECTS, USAGE, RESOURCES } from './previewData';
 import { Mark, AttnFlag, Agent, Meter, SimBadge, Tabs } from './PreviewUi';
 import { stateLabel, hostOf, money, kTokens } from './previewVocab';
+import { HostsDetail } from './HostsView';
+export { HostSidebar } from './HostsView';
 
-const W = 224;
-const H = 90;
+const W = 332;
+const H = 220;
 
 export function PreviewMap() {
   const s = usePreviewStore();
   const [projectId, setProjectId] = useState(s.sel.projectId);
+  const [positions, setPositions] = useState(() => { try { return JSON.parse(localStorage.getItem('lx_preview_map_positions') || '{}') || {}; } catch { return {}; } });
+  const drag = useRef(null);
+  const position = (id, point) => setPositions((previous) => {
+    const next = {...previous, [projectId]: {...previous[projectId], [id]: point}};
+    try { localStorage.setItem('lx_preview_map_positions', JSON.stringify(next)); } catch { /* solo se conserva durante esta sesión */ }
+    return next;
+  });
   const tasks = s.tasks.filter((t) => t.projectId === projectId);
   const ids = new Set(tasks.map((t) => t.id));
   const edges = EDGES.filter((e) => ids.has(e.from) && ids.has(e.to));
@@ -24,10 +34,10 @@ export function PreviewMap() {
     const cols = {};
     tasks.forEach((t) => { (cols[depth[t.id]] = cols[depth[t.id]] || []).push(t); });
     const pos = {};
-    Object.entries(cols).forEach(([d, list]) => list.forEach((t, i) => { pos[t.id] = { x: 150 + Number(d) * 380, y: 24 + i * 120, col: Number(d) }; }));
+    Object.entries(cols).forEach(([d, list]) => list.forEach((t, i) => { pos[t.id] = { x: 40 + Number(d) * 430, y: 40 + i * 280, col: Number(d), ...positions[projectId]?.[t.id] }; }));
     const all = Object.values(pos);
     return { pos, w: Math.max(...all.map((p) => p.x), 0) + W + 40, h: Math.max(...all.map((p) => p.y), 0) + H + 30 };
-  }, [projectId, tasks.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, tasks.length, positions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const route = (e, k) => {
     const a = layout.pos[e.from];
@@ -50,7 +60,7 @@ export function PreviewMap() {
       <header className="pv-view__head">
         <h1 className="pv-view__title">Mapa</h1>
         <span className="pv-tag pv-tone-waiting">experimental</span>
-        <span className="pv-muted">Dependencias e intención entre Tasks en paralelo.</span>
+        <span className="pv-muted">Dependencias entre tareas</span>
         <span className="panelhead__fill" />
         <Tabs value={projectId} onChange={setProjectId} label="Project" options={PROJECTS.map((p) => ({ id: p.id, label: p.name }))} />
       </header>
@@ -65,19 +75,29 @@ export function PreviewMap() {
             const p = layout.pos[t.id];
             const atts = attemptsOfTask(s, t.id);
             const attn = atts.reduce((n, a) => n + s.attention.filter((x) => x.attemptId === a.id).length, 0);
+            const permission = s.attention.find((item) => item.kind === 'permission' && atts.some((a) => a.id === item.attemptId));
             return (
               <foreignObject key={t.id} x={p.x} y={p.y} width={W} height={H}>
-                <button type="button" className={`pv-node${s.sel.taskId === t.id ? ' is-sel' : ''}`} onClick={() => s.select(atts[0].id)}>
+                <article className={`pv-node${s.sel.taskId === t.id ? ' is-sel' : ''}`}>
+                  <div className="pv-node__handle" tabIndex={0} role="button" aria-label={`Mover ${t.title}. Usa las flechas para ordenar.`}
+                    onKeyDown={(event) => { const delta = {ArrowLeft: [-10,0], ArrowRight: [10,0], ArrowUp: [0,-10], ArrowDown: [0,10]}[event.key]; if (delta) { event.preventDefault(); position(t.id, {x: Math.max(0,p.x + delta[0]),y: Math.max(0,p.y + delta[1])}); } }}
+                    onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); drag.current = {id: t.id, x: event.clientX, y: event.clientY, originX: p.x, originY: p.y}; }}
+                    onPointerMove={(event) => { const moving = drag.current; if (moving?.id === t.id) position(t.id, {x: Math.max(0, moving.originX + event.clientX - moving.x), y: Math.max(0, moving.originY + event.clientY - moving.y)}); }}
+                    onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
                   <span className="pv-node__title pv-trunc">{t.title}</span>
+                  <span aria-hidden="true">⠿</span></div>
                   <span className="pv-node__marks">{atts.map((a) => <span key={a.id} title={`Intento ${a.label} · ${stateLabel(a)}`}><Mark attempt={a} size={12} /></span>)}<span className="panelhead__fill" />{attn > 0 && <AttnFlag n={attn} />}</span>
-                  {t.run && <span className="pv-node__run pv-trunc">Run · {t.run}</span>}
-                </button>
+                  {permission && <details className="pv-node__permission"><summary>Ver qué necesita</summary><span>Permiso · {permission.risk === 'high' ? 'riesgo alto' : 'requiere tu decisión'}</span><p>{permission.title}</p><div className="pv-wrap"><button type="button" className="btn btn--primary btn--sm" onClick={() => s.resolveAttention(permission.id, 'allow_once')}>Permitir</button><button type="button" className="btn btn--ghost btn--sm" onClick={() => s.resolveAttention(permission.id, 'deny')}>Rechazar</button></div></details>}
+                  <div className="pv-node__agents">{atts.map((a) => <Agent key={a.id} attempt={a} detail={false} />)}</div>
+                  <button type="button" className="lk pv-node__open" disabled={!atts.length} onClick={() => s.select(atts[0].id)}>Abrir el intento ↗</button>
+                </article>
               </foreignObject>
             );
           })}
         </svg>
       </div>
       <div className="pv-map__legend">
+        <span>Arrastra las tarjetas para ordenarlas; el orden se guarda por proyecto</span><button type="button" className="lk" onClick={() => setPositions((previous) => { const next = {...previous, [projectId]: {}}; try {localStorage.setItem('lx_preview_map_positions', JSON.stringify(next));} catch {} return next; })}>Ordenar automáticamente</button>
         <span><i className="pv-legend pv-edge--child" /> hija del Run coordinador</span>
         <span><i className="pv-legend pv-edge--blocks" /> bloquea (dependencia de intención)</span>
         <span><i className="pv-legend pv-edge--overlaps" /> tocan los mismos archivos</span>
@@ -90,7 +110,9 @@ export function PreviewMap() {
   );
 }
 
-export function PreviewHosts() {
+export function PreviewHosts() { return <HostsDetail><LegacyHosts /></HostsDetail>; }
+
+function LegacyHosts() {
   const s = usePreviewStore();
   return (
     <div className="pv-pad scroll">
@@ -100,7 +122,7 @@ export function PreviewHosts() {
           const atts = s.attempts.filter((a) => a.host === h.id);
           return (
             <article key={h.id} className={`pv-host${h.status === 'offline' ? ' is-off' : ''}`}>
-              <header><span className={`dot ${h.status === 'online' ? 'dot--good' : ''}`} /><b>{h.name}</b><span className="pv-tag pv-tag--dim">{h.transport}</span><span className="panelhead__fill" /><span className={h.status === 'online' ? 'pv-good' : 'pv-muted'}>{h.status === 'online' ? 'Conectado' : 'Desconectado'}</span></header>
+              <header><StatusIcon kind={h.status === 'offline' ? 'offline' : atts.some((a) => a.state === 'waiting') ? 'host-needs' : /windows/i.test(h.os) ? 'monitor' : /mac/i.test(h.os) ? 'laptop' : 'server'} size={20} /><b>{h.name}</b><span className="pv-tag pv-tag--dim">{h.transport}</span><span className="panelhead__fill" /><span className={h.status === 'online' ? 'pv-good' : 'pv-muted'}>{h.status === 'online' ? 'Conectado' : 'Desconectado'}</span></header>
               <div className="pv-muted">{h.os} · {h.note}</div>
               <div><b className="mono">{hostCount(s, h.id)}</b> Intentos · {atts.filter((a) => a.state === 'working').length} en ejecución</div>
               <ul className="pv-host__list">

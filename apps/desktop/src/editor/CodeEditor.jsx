@@ -30,6 +30,16 @@ const tabC = new Compartment();
 const wrapC = new Compartment();
 const sizeC = new Compartment();
 const themeC = new Compartment();
+let currentThemeFor = cmThemeFor;
+
+// Actualiza también los documentos abiertos: CodeMirror conserva su propio estado fuera de React.
+if (import.meta.hot) import.meta.hot.accept('./cmTheme', (module) => {
+  if (!module) return;
+  currentThemeFor = module.cmThemeFor;
+  const theme = currentThemeFor(themeMode());
+  activeView?.dispatch({ effects: themeC.reconfigure(theme) });
+  for (const [file, state] of states) states.set(file, state.update({ effects: themeC.reconfigure(theme) }).state);
+});
 
 const tabExt = (n) => [EditorState.tabSize.of(n), indentUnit.of(' '.repeat(n))];
 const sizeExt = (px) => EditorView.theme({ '&': { fontSize: `${px}px` } });
@@ -82,7 +92,7 @@ export function CodeEditor({ path, content, options, reveal, baseline, diagnosti
       agentReviewExtension,
       diagnosticsExtension,
       keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, ...completionKeymap, indentWithTab]),
-      themeC.of(cmThemeFor(themeMode())),
+      themeC.of(currentThemeFor(themeMode())),
       langC.of([]),
       tabC.of(tabExt(options.tabSize)),
       wrapC.of(options.wordWrap ? EditorView.lineWrapping : []),
@@ -104,7 +114,7 @@ export function CodeEditor({ path, content, options, reveal, baseline, diagnosti
     viewRef.current = new EditorView({ parent: hostRef.current, state: EditorState.create({ doc: '' }) });
     activeView = viewRef.current;
     const stopThemeWatch = watchTheme((mode) => {
-      viewRef.current?.dispatch({ effects: themeC.reconfigure(cmThemeFor(mode)) });
+      viewRef.current?.dispatch({ effects: themeC.reconfigure(currentThemeFor(mode)) });
     });
     const onReviewEvent = (e) => cbs.current.onReview?.(e.detail.action, e.detail.index);
     viewRef.current.dom.addEventListener('lx-review', onReviewEvent);
@@ -125,7 +135,7 @@ export function CodeEditor({ path, content, options, reveal, baseline, diagnosti
     pathRef.current = path;
     view.setState(states.get(path) || makeState(content));
     applyOptions(view, options);
-    view.dispatch({ effects: themeC.reconfigure(cmThemeFor(themeMode())) });
+    view.dispatch({ effects: themeC.reconfigure(currentThemeFor(themeMode())) });
     const head = view.state.selection.main.head;
     const line = view.state.doc.lineAt(head);
     cbs.current.onCursor?.({ line: line.number, col: head - line.from + 1, selected: 0 });
