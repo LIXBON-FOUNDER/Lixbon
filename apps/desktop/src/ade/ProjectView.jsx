@@ -517,14 +517,16 @@ export function ProjectView({
 
       {actions && <div className="pv__actions" data-testid="project-actions">{actions}</div>}
 
+      <Tasks slice={normalizeSlice(tasks)} projectId={projectId} filter={activeFilter} onFilter={setFilter} onOpenTask={onOpenTask} onLoadMore={onLoadMoreTasks} headingId={`${uid}-tasks`} />
+      <details className="ade-project-details"><summary>Atención del proyecto</summary><Attention slice={normalizeSlice(attention)} projectId={projectId} onOpenAttention={onOpenAttention} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-attention`} /></details>
+      <details className="ade-project-details"><summary>Resumen y recursos del proyecto</summary>
       <Summary summary={summary} headingId={`${uid}-summary`} />
       <Locations slice={locSlice} headingId={`${uid}-locations`} />
-      <Attention slice={normalizeSlice(attention)} projectId={projectId} onOpenAttention={onOpenAttention} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-attention`} />
-      <Tasks slice={normalizeSlice(tasks)} projectId={projectId} filter={activeFilter} onFilter={setFilter} onOpenTask={onOpenTask} onLoadMore={onLoadMoreTasks} headingId={`${uid}-tasks`} />
       <Activity slice={normalizeSlice(activity)} projectId={projectId} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-activity`} />
       <Resources slice={normalizeSlice(resources)} inventory={resourceInventory} inventoryStatus={resourceInventoryStatus} onRetryInventory={onRetryResourceInventory} projectId={projectId} onOpenResource={onOpenResource} headingId={`${uid}-resources`} />
       {/* Autonomía (LXO-210): cerrada hasta que se pide; el Core es la autoridad de la policy. */}
       {isId(projectId) && <AutonomyEditor projectId={projectId} />}
+      </details>
     </article>
   );
 }

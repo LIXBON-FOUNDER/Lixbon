@@ -1,3 +1,5 @@
+import { modelThink } from '../chat/modelReasoning';
+import { projectAllows, useProjectCommands } from './projectCommands';
 // chatStore.js — estado del chat del IDE.
 // Los mensajes viven en memoria; el historial persistente está en el backend
 // (tabla conversations), así que no se duplica en localStorage.
@@ -507,6 +509,7 @@ function makeChatStore() {
             serverUrl,
             apiKey,
             model: currentModel,
+            think: modelThink(useSessionsStore.getState().activeKey, currentModel, appState.availableModels.find((model) => model.id === currentModel)),
             messages: [...systemMsg, ...fitted.messages],
             conversationId: convId,
             signal,
@@ -750,7 +753,7 @@ function makeChatStore() {
         Los comandos (run_command) son irreversibles → SIEMPRE piden confirmación
         salvo que estén en la allowlist o que el usuario active auto-run; el
         auto-aplicado de archivos (autoApprove) NO los cubre. */
-    _needsApproval: (tool, args) => {
+    _needsApproval: (tool, args, root = useAppStore.getState().workspaceRoot) => {
       const cat = toolCategory(tool);
       const policy = get().toolPolicy[cat] || 'ask';
       if (policy === 'never') return 'never';
@@ -759,6 +762,7 @@ function makeChatStore() {
         if (isLxoCommand(cmd)) return false;
         // Ni con auto-run: los comandos que ejecutan código externo (npx, curl,
         // flags -e/-c), instalan paquetes o encadenan piden aprobación SIEMPRE.
+        if (projectAllows(root, cmd)) return false;
         if (policy === 'allow') return isNeverAutoCommand(cmd);
         return !isAllowedCommand(cmd, get().commandAllowlist);
       }
@@ -780,7 +784,7 @@ function makeChatStore() {
           output: `Estás en modo ${label}: solo lectura. No puedes usar ${tool}. Sigue investigando o termina tu respuesta.`,
         };
       }
-      const need = get()._needsApproval(tool, args);
+      const need = get()._needsApproval(tool, args, root);
       if (need === 'never') {
         return {
           ok: false, display: 'bloqueado por tus permisos', change: null,
@@ -799,7 +803,8 @@ function makeChatStore() {
           set({ pendingApproval: { tool, args, change, resolve } });
         });
         // "Permitir siempre" solo abre la categoría de esta herramienta.
-        if (decision === 'always') get().setToolPolicy(toolCategory(tool), 'allow');
+        if (decision === 'project' && isCommand) useProjectCommands.getState().allow(root, args.command);
+        else if (decision === 'always') get().setToolPolicy(toolCategory(tool), 'allow');
         else if (decision !== 'yes') {
           return { ok: false, display: 'rechazado por el usuario', output: 'Ejecución cancelada por el usuario', change };
         }
