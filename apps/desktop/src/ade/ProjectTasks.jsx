@@ -101,14 +101,13 @@ function TaskRow({ project, task, selected, stale, position, setSize, isActiveKe
           </button>
         )}
       </span>
-      <span className={`ps__task-state ps__badge--${tone}`} data-status={task.status}>{statusLabel}</span>
+      <span className={`${expandable ? 'ps__sr-only' : 'ps__task-state'} ps__badge--${tone}`} data-status={task.status}>{statusLabel}</span>
       {attempts && (
         <span className="ps__line ps__line--attempt" data-testid="task-attempt-summary">
-          {latest ? <AttemptChip attempt={latest} /> : <NoAttempts />}
-          {attempts.count > 1 && <span className="ps__hint">último de {attempts.count}</span>}
+          {expandable ? <span className="ps__hint">{attempts.count} intentos</span> : latest ? <span className="ps__sr-only"><AttemptChip attempt={latest} /></span> : <NoAttempts />}
         </span>
       )}
-      <details className="ps__task-details" onClick={(event) => event.stopPropagation()}><summary>Detalles de la tarea</summary><span className="ps__meta" id={metaId}>
+      <span className="ps__sr-only" id={metaId}>
         <span className="ps__id mono">{task.id}</span>
         {latest ? <AttemptMeta attempt={latest} /> : (
           <>
@@ -118,7 +117,7 @@ function TaskRow({ project, task, selected, stale, position, setSize, isActiveKe
             <span>Worktree {asText(task.worktree) ?? 'Solo en detalle'}</span>
           </>
         )}
-      </span></details>
+      </span>
       {expandedAttempts && (
         <TaskAttemptGroup projectId={project.id} taskId={task.id} taskTitle={task.title || task.id} expectedCount={attempts.count} />
       )}

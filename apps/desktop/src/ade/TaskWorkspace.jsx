@@ -298,7 +298,7 @@ function Banner({ state, hasData, projectId, taskId }) {
  *   y con los IDs seleccionados. Sin callback se muestra "No disponible" (no hay vista simulada ni ruta legacy).
  * - `variant`: `'workspace'` (por defecto) o `'inspector'` (solo cambia la clase CSS compacta).
  */
-export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, onOpenActivity, onOpenAttention, variant = 'workspace' }) {
+export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, onOpenActivity, onOpenAttention, variant = 'workspace', attemptSelector = null }) {
   const uid = useId();
   const state = detail ?? { status: 'idle', data: null, error: null, reason: null, updatedAt: null };
   const hasTarget = Boolean(text(projectId) && text(taskId));
@@ -355,6 +355,7 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
         )}
         {refreshable && <button type="button" className="twk__action" onClick={state.retry}>Actualizar</button>}
       </header>
+      {visible && variant === 'workspace' && attemptSelector}
 
       {visible && variant === 'workspace' && <div className="ade-core-phase"><div className="ade-start__phases" aria-label="Fases del intento"><span>Preparación</span><span>Ejecución</span><span>Verificación</span><span>Revisión · tú</span><span>Integración · tú</span></div><p>Fase: <PhaseValue phase={visible.phase} /></p></div>}
 

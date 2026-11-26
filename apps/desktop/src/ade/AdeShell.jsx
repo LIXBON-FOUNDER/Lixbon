@@ -18,6 +18,7 @@ import { ProjectView } from './ProjectView';
 import { TaskWorkspace } from './TaskWorkspace';
 import { AttemptHistory } from './AttemptHistory';
 import { AttemptDetail } from './AttemptDetail';
+import { AttemptSelector } from './AttemptSelector';
 import { ContextPreview } from './ContextPreview';
 import { NewAttemptForm } from './NewAttemptForm';
 import { ProviderInspector } from './ProviderInspector';
@@ -1027,16 +1028,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               )}
               {selectedTaskId && (
                 <div className="ade__task-overview scroll">
-                  <TaskWorkspace {...workspaceProps} variant="workspace" />
-                  <details className="ade-history-disclosure" open={!selectedAttemptId}><summary>Intentos de esta tarea</summary><AttemptHistory
-                    taskId={selectedTaskId}
-                    coreModel={coreModel}
-                    active={workspaceActive && workspaceView === 'workspace'}
-                    selectedAttemptId={selectedAttemptId}
-                    onSelectAttempt={(attemptId) => selectAttempt({ projectId: selectedProjectId, taskId: selectedTaskId, attemptId })}
-                    onBack={() => selectTask({ projectId: selectedProjectId, taskId: null })}
-                  />
-                  </details>
+                  <TaskWorkspace {...workspaceProps} variant="workspace" attemptSelector={<AttemptSelector taskId={selectedTaskId} coreModel={coreModel} active={workspaceActive && workspaceView === 'workspace'} selectedAttemptId={selectedAttemptId} onSelect={(attemptId) => selectAttempt({projectId: selectedProjectId, taskId: selectedTaskId, attemptId})} onCompare={() => changeWorkspaceView('compare')} />} />
                   {selectedAttemptId && (
                     <AttemptDetail
                       projectId={selectedProjectId}
@@ -1122,7 +1114,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
             drawerOpen={drawerOpen}
             onCloseDrawer={onCloseDrawer}
           >
-            <div className="panelhead"><span className="panelhead__title">Inspector</span></div>
+            <div className="panelhead"><span className="panelhead__title">Inspector</span><span className="panelhead__fill" />{selectedTaskId && detail.retry && <button type="button" className="lk" onClick={detail.retry}>Actualizar</button>}</div>
             <div className="ade-real-inspector-tabs" role="tablist" aria-label="Inspector" onKeyDown={(event) => {
               const keys = ['task', 'changes', 'context', 'autonomy'];
               const index = keys.indexOf(inspectorTab);

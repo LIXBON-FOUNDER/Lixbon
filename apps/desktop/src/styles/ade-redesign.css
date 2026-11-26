@@ -453,3 +453,24 @@
 [data-ui='ide'] .modal .nat__extra[open] > summary { margin-bottom: 12px; }
 [data-ui='ide'] .modal:has(.nat__form) .modal__footer .nat__actions { justify-content: flex-end; }
 [data-ui='ide'] .nat > button[hidden] { display: none; }
+/* Densidad de las vistas conectadas: jerarquía de 13–16 px del lienzo. */
+[data-ui='ide'] .ade__task-overview .twk__title, [data-ui='ide'] .ade-attempt-design-head h2,
+[data-ui='ide'] .ade-core-map h1, [data-ui='ide'] .ade-core-hosts h1, [data-ui='ide'] .ade-core-integrations h1 { font-size: 16px; font-weight: 500; }
+[data-ui='ide'] .twk--inspector > .twk__head, [data-ui='ide'] .twk--inspector > .twk__subtitle { display: none; }
+[data-ui='ide'] .ade__inspector > .panelhead .lk { font-size: 13px; color: var(--ink-muted); }
+[data-ui='ide'] .ade-attempt-selector { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 12px; }
+[data-ui='ide'] .ade-attempt-selector > div { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
+[data-ui='ide'] .ade-attempt-selector > div > button { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; font-size: 14px; color: var(--ink-muted); }
+[data-ui='ide'] .ade-attempt-selector button[aria-pressed='true'] { color: var(--ink); background: var(--surface-3); }
+[data-ui='ide'] .ade-attempt-selector small, [data-ui='ide'] .ade-attempt-selector > .lk { font-size: 13px; color: var(--ink-muted); }
+[data-ui='ide'] .ade-attempt .aq__head { margin: 0; }
+[data-ui='ide'] .ade-attempt .aq__head h4 { margin: 0; font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: .1px; }
+[data-ui='ide'] .ade-attempt .aq__count { font-size: 13px; border: 0; padding: 0; color: var(--ink-muted); }
+[data-ui='ide'] .ade-attempt .aq__composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+[data-ui='ide'] .ade-attempt .aq__composer > .aq__text { grid-column: 1 / -1; }
+[data-ui='ide'] .ade-attempt .aq__composer > .aq__send-options { grid-column: 1; grid-row: 2; align-self: center; }
+[data-ui='ide'] .ade-attempt .aq__composer > .nat__actions { grid-column: 2; grid-row: 2; }
+[data-ui='ide'] .ade-attempt .aq__composer > :not(.aq__text):not(.aq__send-options):not(.nat__actions) { grid-column: 1 / -1; }
+[data-ui='ide'] .ade-attempt-activity > .ssec__label { margin: 0 0 12px; font-size: 13px; text-transform: none; font-weight: 400; }
+[data-ui='ide'] .ps__item--task { gap: 4px; padding-top: 6px; padding-bottom: 6px; }
+[data-ui='ide'] .ps__line--attempt:has(> .ps__sr-only:only-child) { display: none; }
