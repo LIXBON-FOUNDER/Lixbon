@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { answerProviderRequest, describeCommandError, pendingProviderRequests } from './attemptCommands';
+import { StatusIcon } from '@lixbon/icons/status';
+import { formatUtc } from './attemptFormat';
 
 /** El Core admite hasta 4 000 caracteres en la respuesta a una pregunta. */
 export const MAX_ANSWER_CHARS = 4000;
@@ -26,20 +28,28 @@ function ErrorNotice({ error, testId }) {
  * proveedor no la acepta, la petición sigue pendiente y se puede reintentar. Todo es texto, nunca HTML ni enlaces.
  */
 export function AttemptAnswer({ attemptId, onAnswered, inbox = false }) {
+  return <ProviderRequests key={attemptId} attemptId={attemptId} onAnswered={onAnswered} inbox={inbox} />;
+}
+
+function ProviderRequests({ attemptId, onAnswered, inbox }) {
   const [state, setState] = useState({ requests: null, live: true, error: null });
   const [drafts, setDrafts] = useState({});
   const [busyId, setBusyId] = useState(null);
   const [failures, setFailures] = useState({});
   const [sent, setSent] = useState({});
   const alive = useRef(true);
+  const readEpoch = useRef(0);
+  const sending = useRef(false);
 
   const load = useCallback(async () => {
+    const epoch = ++readEpoch.current;
     try {
       const result = await pendingProviderRequests(attemptId);
-      if (!alive.current) return;
+      if (!alive.current || epoch !== readEpoch.current) return;
+      if (result?.attempt_id !== attemptId || !Array.isArray(result?.requests)) throw new Error('ade_command_invalid_response: peticiones de otro intento o respuesta inválida');
       setState({ requests: Array.isArray(result?.requests) ? result.requests : [], live: result?.live !== false, error: null });
     } catch (failure) {
-      if (alive.current) setState((current) => ({ ...current, error: describeCommandError(failure) }));
+      if (alive.current && epoch === readEpoch.current) setState((current) => ({ ...current, error: describeCommandError(failure) }));
     }
   }, [attemptId]);
 
@@ -52,6 +62,8 @@ export function AttemptAnswer({ attemptId, onAnswered, inbox = false }) {
 
   const send = async (request, answer, options) => {
     const id = request.request_id;
+    if (sending.current || sent[id] || !alive.current) return;
+    sending.current = true;
     setBusyId(id);
     setFailures((current) => ({ ...current, [id]: null }));
     try {
@@ -62,8 +74,9 @@ export function AttemptAnswer({ attemptId, onAnswered, inbox = false }) {
     } catch (failure) {
       if (alive.current) setFailures((current) => ({ ...current, [id]: describeCommandError(failure) }));
     } finally {
+      sending.current = false;
       if (alive.current) setBusyId(null);
-      load();
+      if (alive.current) load();
     }
   };
 
@@ -85,19 +98,21 @@ export function AttemptAnswer({ attemptId, onAnswered, inbox = false }) {
         const isPermission = request.kind === 'permission';
         const draft = drafts[id] ?? '';
         const busy = busyId === id;
+        const disabled = busyId !== null || Boolean(sent[id]) || Boolean(error) || !live;
+        const when = formatUtc(request.asked_at);
         return (
           <section key={id} className="nat-answer__request" aria-label={`${KIND_LABEL[request.kind] ?? 'Petición'} del proveedor`} data-testid="attempt-answer-request" data-request-id={id} data-kind={request.kind}>
-            <h5 className="nat-answer__title">{KIND_LABEL[request.kind] ?? 'Petición'}</h5>
+            <header className="nat-answer__head"><h5 className="nat-answer__title"><StatusIcon kind={isPermission ? 'permission' : 'question'} size={16} />{isPermission ? 'Te pide permiso' : KIND_LABEL[request.kind] ?? 'Petición'}</h5>{when && <time dateTime={when.iso} title={when.label}>{when.iso.slice(11,16)} UTC</time>}</header>
             {isPermission ? (
-              <p className="nat-answer__subject">Quiere usar <code className="mono">{request.subject}</code>{request.summary ? <>: <span>{request.summary}</span></> : null}</p>
+              <><p className="nat-answer__subject">Quiere usar <code className="mono">{request.subject}</code></p>{request.summary && <p className="nat-answer__description">{request.summary}</p>}</>
             ) : (
               <p className="nat-answer__subject">{request.subject}</p>
             )}
             {isPermission ? (
               <div className="nat__actions">
-                {inbox && <button type="button" className="btn btn--danger btn--sm" disabled={busy} onClick={() => send(request, 'deny')} data-testid="attempt-answer-deny">Rechazar</button>}
-                <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={() => send(request, 'allow', { confirm: true })} data-testid="attempt-answer-allow">{inbox ? 'Permitir una vez' : 'Permitir'}</button>
-                {!inbox && <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => send(request, 'deny')} data-testid="attempt-answer-deny">Denegar</button>}
+                {inbox && <button type="button" className="btn btn--danger btn--sm" disabled={disabled} onClick={() => send(request, 'deny')} data-testid="attempt-answer-deny">Rechazar</button>}
+                <button type="button" className="btn btn--primary btn--sm" disabled={disabled} onClick={() => send(request, 'allow', { confirm: true })} data-testid="attempt-answer-allow">{busy ? 'Enviando…' : 'Permitir una vez'}</button>
+                {!inbox && <button type="button" className="btn btn--ghost btn--sm" disabled={disabled} onClick={() => send(request, 'deny')} data-testid="attempt-answer-deny">Rechazar</button>}
               </div>
             ) : (
               <>
@@ -108,13 +123,13 @@ export function AttemptAnswer({ attemptId, onAnswered, inbox = false }) {
                     rows={3}
                     maxLength={MAX_ANSWER_CHARS}
                     value={draft}
-                    disabled={busy}
+                    disabled={disabled}
                     onChange={(event) => setDrafts((current) => ({ ...current, [id]: event.target.value }))}
                     data-testid="attempt-answer-text"
                   />
                 </label>
                 <div className="nat__actions">
-                  <button type="button" className="btn btn--primary btn--sm" disabled={busy || !draft.trim()} onClick={() => send(request, draft)} data-testid="attempt-answer-send">{busy ? 'Enviando…' : 'Responder'}</button>
+                  <button type="button" className="btn btn--primary btn--sm" disabled={disabled || !draft.trim()} onClick={() => send(request, draft)} data-testid="attempt-answer-send">{busy ? 'Enviando…' : 'Responder'}</button>
                 </div>
               </>
             )}
