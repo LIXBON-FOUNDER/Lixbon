@@ -63,9 +63,10 @@ export function CoreContext({ attemptId, projectId, active }) {
   </div>;
 }
 
-export function CoreChanges({ attemptId, attempt, active, onReview }) {
+export function CoreChanges({ attemptId, attempt, proofState, active, onReview }) {
   const [file, setFile] = useState(null);
-  const state = useCoreQuery('attempt_proof_pack', { attempt_id: attemptId }, { enabled: Boolean(active && attemptId) });
+  const own = useCoreQuery('attempt_proof_pack', { attempt_id: attemptId }, { enabled: Boolean(active && attemptId && !proofState) });
+  const state = proofState ?? own;
   const pack = state.data;
   const changes = pack?.changes;
   const known = (evidence) => evidence && evidence.provenance !== 'unknown';

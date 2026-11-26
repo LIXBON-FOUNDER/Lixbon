@@ -24,6 +24,8 @@ import { AttemptOwnership } from './AttemptOwnership';
 import { AttemptTransfer } from './AttemptTransfer';
 import { useCoreQuery } from './useCoreQuery';
 import { formatCost, formatTokens } from './usageModel';
+import { evidenceForAttempt, knownEvidence } from './attemptEvidence';
+import { StatusIcon } from '@lixbon/icons/status';
 
 /**
  * LXO-122 · Detalle de UN Attempt (solo lectura), de `attempt_detail`. Nada se inventa: lo que el
@@ -48,7 +50,7 @@ function Row({ label, children }) {
   return (<><dt>{label}</dt><dd>{children}</dd></>);
 }
 
-export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true, requestedTab = null, onSnapshot }) {
+export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true, requestedTab = null, onSnapshot, evidence = null }) {
   const enabled = Boolean(active && attemptId && coreModel?.vNext);
   // Mientras el intento está activo se relee deprisa: «Detener», la cola y los avisos dependen de verlo `running` a tiempo (con el sondeo
   // normal, de 15 s, un intento corto terminaba antes de pintarse como activo).
@@ -94,17 +96,25 @@ export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelec
     const runningDuration = ['running', 'starting'].includes(attempt.status) && Number.isSafeInteger(attempt.started_at) && attempt.started_at > 0 && now >= attempt.started_at
       ? `${formatDurationMs(now - attempt.started_at)} en marcha` : null;
     const usage = attempt.usage;
+    const pack = evidenceForAttempt(evidence, attempt.id, attempt.task_id);
+    const knownCount = field => knownEvidence(field) && Number.isSafeInteger(field.value) && field.value >= 0;
+    const tests = knownEvidence(pack?.tests) && typeof pack.tests.value === 'string' ? pack.tests.value : null;
     const tokens = Number.isSafeInteger(usage?.input_tokens) && usage.input_tokens >= 0 && Number.isSafeInteger(usage?.output_tokens) && usage.output_tokens >= 0 && Number.isSafeInteger(usage.input_tokens + usage.output_tokens) ? usage.input_tokens + usage.output_tokens : null;
     const artifacts = Array.isArray(attempt.artifacts) ? attempt.artifacts : [];
     body = (
       <>
         <header className={`ade-attempt-design-head${onSnapshot ? ' sr-only' : ''}`}><h2>Intento {attempt.n}</h2><span>{[attempt.provider, attempt.model].filter(Boolean).join(' · ')}</span><StatusText info={attemptStatusInfo(attempt.status)} /></header>
-        <div className="ade-attempt-metrics"><span>{runningDuration || (duration === COPY.notAvailable ? COPY.durationUnavailable : `${duration} en total`)}</span><span>{typeof usage?.cost_usd === 'number' && Number.isFinite(usage.cost_usd) && usage.cost_usd >= 0 ? formatCost(usage.cost_usd) : 'Coste no informado'}</span><span>{tokens === null ? 'Tokens no informados' : `${formatTokens(tokens)} tokens de entrada y salida`}</span></div>
-        <p className="ade-attempt-hostline">{worktree?.machine || COPY.hostUnavailable}{worktree?.path ? ' · worktree' : ''}{worktree?.branch && <> · <span className="mono">{worktree.branch}</span></>}</p>
+        <div className="ade-attempt-metrics">
+          <span>{runningDuration || (duration === COPY.notAvailable ? COPY.durationUnavailable : `${duration} en total`)}</span>
+          <span>{knownCount(pack?.changes?.files) ? <><b>{pack.changes.files.value}</b> archivos</> : 'Archivos · No informado'}{knownCount(pack?.changes?.additions) && knownCount(pack?.changes?.deletions) && <> <em className="is-add">+{pack.changes.additions.value}</em> <em className="is-del">−{pack.changes.deletions.value}</em></>}</span>
+          <span>{tests ? `Pruebas · ${tests}` : 'Pruebas · No informado'}</span>
+          <span title={usage?.source === 'provider_declared' ? 'Declarado por el proveedor' : undefined}><b>{typeof usage?.cost_usd === 'number' && Number.isFinite(usage.cost_usd) && usage.cost_usd >= 0 ? formatCost(usage.cost_usd) : 'Coste no informado'}</b> · {tokens === null ? 'Tokens no informados' : `${formatTokens(tokens)} tokens de entrada y salida`}</span>
+        </div>
+        <p className="ade-attempt-hostline"><StatusIcon kind="server" size={14}/>{worktree?.machine || COPY.hostUnavailable}{worktree?.path ? ' · worktree' : ''}{worktree?.branch && <> · <span>{worktree.branch}</span></>}</p>
         <nav className="ade-attempt-design-tabs" aria-label="Detalle del intento">{[['activity', 'Actividad'], ['changes', 'Cambios'], ['terminal', 'Terminal'], ['artifacts', 'Artefactos'], ['details', 'Acciones y detalles']].map(([id, label]) => <button type="button" key={id} aria-pressed={detailTab === id} className={detailTab === id ? 'is-active' : ''} onClick={() => setDetailTab(id)}>{label}</button>)}</nav>
         {attempt.status === 'pending_approval' && <AttemptApproval attemptId={attempt.id} onDecided={state.retry} />}
         {attempt.status === 'awaiting_terminal_approval' && <AttemptAnswer attemptId={attempt.id} onAnswered={state.retry} />}
-        <div hidden={detailTab !== 'activity'} className="ade-attempt-design-feed"><AttemptActivity attemptId={attempt.id} coreModel={coreModel} active={active && detailTab === 'activity'} /></div>
+        <div hidden={detailTab !== 'activity'} className="ade-attempt-design-feed"><AttemptActivity attemptId={attempt.id} coreModel={coreModel} embedded active={active && detailTab === 'activity'} /></div>
         {detailTab === 'terminal' && <p className="ade-attempt-design-empty">La terminal no está disponible para este intento.</p>}
         <div hidden={detailTab !== 'details'}>
         {!detailV2 && (

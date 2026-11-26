@@ -5,6 +5,8 @@ import { AnswerQuestion } from './AnswerQuestion';
 import { StatusMark } from './StatusMark';
 import './TaskWorkspace.css';
 import { AttemptPhases } from './AttemptWorkspaceHeader';
+import { evidenceForAttempt, evidenceObjective } from './attemptEvidence';
+import { Mark } from './ProvenanceMark';
 
 // Task Workspace / Inspector de solo lectura (LXO-98).
 // Presenta exclusivamente lo que devuelve `task_detail` (project_id + task_id). No infiere host/origen ni
@@ -299,7 +301,7 @@ function Banner({ state, hasData, projectId, taskId }) {
  *   y con los IDs seleccionados. Sin callback se muestra "No disponible" (no hay vista simulada ni ruta legacy).
  * - `variant`: `'workspace'` (por defecto) o `'inspector'` (solo cambia la clase CSS compacta).
  */
-export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, onOpenActivity, onOpenAttention, variant = 'workspace', attemptSelector = null, workspaceActions = null }) {
+export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, onOpenActivity, onOpenAttention, variant = 'workspace', attemptSelector = null, workspaceActions = null, attemptId = null, attemptEvidence = null }) {
   const uid = useId();
   const state = detail ?? { status: 'idle', data: null, error: null, reason: null, updatedAt: null };
   const hasTarget = Boolean(text(projectId) && text(taskId));
@@ -307,6 +309,8 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
   const verified = Boolean(task) && hasTarget && task.id === taskId && task.project_id === projectId;
   const mismatched = Boolean(task) && hasTarget && !verified;
   const visible = verified ? task : null;
+  const proof = visible ? evidenceForAttempt(attemptEvidence, attemptId, visible.id) : null;
+  const objective = evidenceObjective(proof);
   const busy = state.status === 'loading' || state.status === 'refreshing';
   const className = `twk twk--${variant === 'inspector' ? 'inspector' : 'workspace'}`;
   const headingId = `${uid}-title`;
@@ -404,10 +408,10 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
 
       {visible && (
         <>
-        {/* task_detail aún no publica objetivo, criterios, restricciones ni decisiones.
-            Se reserva su lugar sin deducirlos del título, mensajes o fase. */}
+        {/* Objetivo solo desde la evidencia explícita del Core para este intento y Task.
+            No se deduce del título/spec; los campos sin contrato conservan su estado vacío. */}
         <div className="twk__design-summary">
-          <section className="twk__design-section" aria-labelledby={`${uid}-objective`}><h3 id={`${uid}-objective`}>Objetivo</h3><p><Missing /></p></section>
+          <section className="twk__design-section" aria-labelledby={`${uid}-objective`}><h3 id={`${uid}-objective`}>Objetivo</h3><p>{objective || <Missing />}</p>{objective && proof.objective.provenance === 'agent_reported' && <Mark provenance="agent_reported" />}</section>
           <section className="twk__design-section" aria-labelledby={`${uid}-criteria`}><h3 id={`${uid}-criteria`}>Criterios de aceptación</h3><p><Missing /></p></section>
           <section className="twk__design-section" aria-labelledby={`${uid}-constraints`}><h3 id={`${uid}-constraints`}>Restricciones</h3><p><Missing /></p></section>
           <section className="twk__design-section" aria-labelledby={`${uid}-decisions`}><h3 id={`${uid}-decisions`}>Decisiones tomadas</h3><p><Missing /></p></section>

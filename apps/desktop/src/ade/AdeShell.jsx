@@ -20,6 +20,9 @@ import { AttemptHistory } from './AttemptHistory';
 import { AttemptDetail } from './AttemptDetail';
 import { AttemptSelector } from './AttemptSelector';
 import { AttemptWorkspaceActions } from './AttemptWorkspaceHeader';
+import { attemptLetter } from './attemptFormat';
+import { evidenceForAttempt } from './attemptEvidence';
+import { IconRefresh } from '../components/Icons';
 import { ComparedFiles } from './ComparedFiles';
 import { ContextPreview } from './ContextPreview';
 import { NewAttemptForm } from './NewAttemptForm';
@@ -557,6 +560,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
     project_id: selectedProjectId,
     task_id: selectedTaskId,
   }, { enabled: modeActive && Boolean(selectedProjectId) && Boolean(selectedTaskId) });
+  const proof = useCoreQuery('attempt_proof_pack', { attempt_id: selectedAttemptId }, { enabled: Boolean(workspaceActive && workspaceView === 'workspace' && selectedAttemptId && selectedTaskId && coreModel.vNext) });
+  const selectedEvidence = selectedAttempt && ['ready','refreshing'].includes(proof.status) ? evidenceForAttempt(proof.data, selectedAttemptId, selectedTaskId) : null;
   const selectedProject = currentProjectSnapshot?.projectId === selectedProjectId
     ? currentProjectSnapshot.project
     : null;
@@ -928,6 +933,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
     projectId: selectedProjectId,
     taskId: selectedTaskId,
     detail,
+    attemptId: selectedAttemptId,
+    attemptEvidence: selectedEvidence,
     project: selectedProject,
     // Devuelve `true` solo si aceptó el target exacto (mismo Project); el workspace usa esa confirmación para el foco.
     onNavigate: ({ projectId, taskId }) => {
@@ -1044,6 +1051,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                       onSnapshot={setAttemptSnapshot}
                       projectId={selectedProjectId}
                       attemptId={selectedAttemptId}
+                      evidence={selectedEvidence}
                       requestedTab={requestedAttemptTab}
                       taskId={selectedTaskId}
                       coreModel={coreModel}
@@ -1125,7 +1133,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
             drawerOpen={drawerOpen}
             onCloseDrawer={onCloseDrawer}
           >
-            <div className="panelhead"><span className="panelhead__title">Inspector</span><span className="panelhead__fill" />{selectedTaskId && detail.retry && <button type="button" className="lk" onClick={detail.retry}>Actualizar</button>}</div>
+            <div className="panelhead"><span className="panelhead__title">Inspector</span><span className="panelhead__fill" />{selectedAttempt && <span className="ade-inspector-attempt" title={selectedAttempt.id}>Intento {attemptLetter(selectedAttempt.n)}</span>}{selectedTaskId && detail.retry && <button type="button" className="ic ade-inspector-refresh" title="Actualizar el inspector" aria-label="Actualizar el inspector" onClick={()=>{detail.retry();proof.retry();}}><IconRefresh size={14}/></button>}</div>
             <div className="ade-real-inspector-tabs" role="tablist" aria-label="Inspector" onKeyDown={(event) => {
               const keys = ['task', 'changes', 'context', 'autonomy'];
               const index = keys.indexOf(inspectorTab);
@@ -1144,7 +1152,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               {selectedTaskId && <TaskWorkspace {...workspaceProps} variant="inspector" />}
               {selectedTaskId && coreModel.vNext && <details className="ade-task-actions"><summary>Acciones de la tarea</summary><AttemptTransfer key={selectedTaskId} task={{ id: selectedTaskId }} projectId={selectedProjectId} active={workspaceActive} /></details>}
               </>}
-              {inspectorTab === 'changes' && <CoreChanges key={selectedAttemptId} attemptId={selectedAttemptId} attempt={selectedAttempt} active={workspaceActive} onReview={() => { changeWorkspaceView('workspace'); setRequestedAttemptTab({tab: 'changes'}); }} />}
+              {inspectorTab === 'changes' && <CoreChanges key={selectedAttemptId} attemptId={selectedAttemptId} attempt={selectedAttempt} proofState={proof} active={workspaceActive} onReview={() => { changeWorkspaceView('workspace'); setRequestedAttemptTab({tab: 'changes'}); }} />}
               {inspectorTab === 'context' && <CoreContext key={`${selectedProjectId}:${selectedAttemptId}`} projectId={selectedProjectId} attemptId={selectedAttemptId} active={workspaceActive} />}
               {inspectorTab === 'autonomy' && <CoreAutonomy projectId={selectedProjectId} attemptId={selectedAttemptId} profile={selectedAttempt?.profile} active={workspaceActive} />}
             </div>
