@@ -25,7 +25,7 @@ function ErrorNotice({ error, testId }) {
  * aquí no se decide nada: el Core valida la respuesta, se la entrega al proveedor y, con la última, el intento vuelve a correr. Si el
  * proveedor no la acepta, la petición sigue pendiente y se puede reintentar. Todo es texto, nunca HTML ni enlaces.
  */
-export function AttemptAnswer({ attemptId, onAnswered }) {
+export function AttemptAnswer({ attemptId, onAnswered, inbox = false }) {
   const [state, setState] = useState({ requests: null, live: true, error: null });
   const [drafts, setDrafts] = useState({});
   const [busyId, setBusyId] = useState(null);
@@ -71,7 +71,7 @@ export function AttemptAnswer({ attemptId, onAnswered }) {
   const answeredNow = Object.keys(sent);
 
   return (
-    <div className="nat-answer" role="group" aria-label="Responder al proveedor" data-testid="attempt-answer">
+    <div className={`nat-answer${inbox ? ' nat-answer--inbox' : ''}`} role="group" aria-label="Responder al proveedor" data-testid="attempt-answer">
       <p className="nat__hint">El proveedor espera tu respuesta. Si no respondes dentro del plazo, el intento se detiene.</p>
       {requests === null && !error && <p role="status">Leyendo lo que el proveedor espera.</p>}
       {error && <ErrorNotice error={error} testId="attempt-answer-load-error" />}
@@ -95,8 +95,9 @@ export function AttemptAnswer({ attemptId, onAnswered }) {
             )}
             {isPermission ? (
               <div className="nat__actions">
-                <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={() => send(request, 'allow', { confirm: true })} data-testid="attempt-answer-allow">Permitir</button>
-                <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => send(request, 'deny')} data-testid="attempt-answer-deny">Denegar</button>
+                {inbox && <button type="button" className="btn btn--danger btn--sm" disabled={busy} onClick={() => send(request, 'deny')} data-testid="attempt-answer-deny">Rechazar</button>}
+                <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={() => send(request, 'allow', { confirm: true })} data-testid="attempt-answer-allow">{inbox ? 'Permitir una vez' : 'Permitir'}</button>
+                {!inbox && <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => send(request, 'deny')} data-testid="attempt-answer-deny">Denegar</button>}
               </div>
             ) : (
               <>

@@ -9,8 +9,7 @@ import { MCP_CATALOG } from '../../lib/mcp';
 import { Segmented } from '../../components/Segmented';
 import { SpinRing } from '../../components/Ring';
 import { IconSearch, IconRefresh } from '../../components/Icons';
-
-const initials = (name) => name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).replace(/^./, (c) => c.toUpperCase()) || 'MC';
+import { ServiceMark } from '../../components/ServiceMark';
 
 export function StatusMark({ status }) {
   if (status === 'starting') return <SpinRing size={12} />;
@@ -78,7 +77,7 @@ export function McpList() {
             className={`extrow rise ${activePath === `mcp://${s.name}` ? 'is-active' : ''}`}
             onClick={() => openVirtual(`mcp://${s.name}`, s.name)}
           >
-            <span className="extrow__tile">{initials(s.name)}</span>
+            <span className="extrow__tile extrow__tile--brand"><ServiceMark name={s.name} size={20} /></span>
             <span className="extrow__main">
               <span className="extrow__name">{s.name}<StatusMark status={s.enabled ? s.status : 'stopped'} /></span>
               <span className="extrow__desc">
@@ -95,7 +94,7 @@ export function McpList() {
             className={`extrow rise ${activePath === `mcp-catalog://${c.id}` ? 'is-active' : ''}`}
             onClick={() => openVirtual(`mcp-catalog://${c.id}`, c.name)}
           >
-            <span className="extrow__tile">{initials(c.name)}</span>
+            <span className="extrow__tile extrow__tile--brand"><ServiceMark name={c.id} size={20} /></span>
             <span className="extrow__main">
               <span className="extrow__name">{c.name}{servers[c.id] && <span className="tag tag--good">instalada</span>}</span>
               <span className="extrow__desc">{c.desc}</span>

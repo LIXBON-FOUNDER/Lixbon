@@ -9,11 +9,13 @@ import { useCoreQuery } from './useCoreQuery';
  * proveedor. Sin lectura (modelo inactivo, error, cargando) no hay botones. La decisión es la misma que la del detalle del
  * Attempt: el Core vuelve a comprobar el estado y el plazo.
  */
-export function InboxLaunchApproval({ attemptId }) {
+export function InboxLaunchApproval({ attemptId, onDecided, active = true }) {
   // Con el sondeo normal: si el intento se aprueba desde otro sitio, los botones desaparecen solos.
-  const state = useCoreQuery('attempt_detail', { attempt_id: attemptId });
+  const state = useCoreQuery('attempt_detail', { attempt_id: attemptId }, { enabled: active });
   const status = state.data?.attempt?.status;
-  if (status === 'pending_approval') return <AttemptApproval attemptId={attemptId} />;
-  if (status === 'awaiting_terminal_approval') return <AttemptAnswer attemptId={attemptId} />;
+  if (!active) return null;
+  const decided = () => { state.retry(); onDecided?.(); };
+  if (status === 'pending_approval') return <AttemptApproval attemptId={attemptId} onDecided={decided} />;
+  if (status === 'awaiting_terminal_approval') return <AttemptAnswer attemptId={attemptId} onAnswered={decided} inbox />;
   return null;
 }

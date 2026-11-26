@@ -7,6 +7,8 @@ import { Segmented } from '../../../components/Segmented';
 import { IconShield } from '../../../components/Icons';
 import { PageHead, SectionHead } from '../SettingsParts';
 import { CommandAllowlist } from '../CommandAllowlist';
+import { useAppStore } from '../../../store/appStore';
+import { projectCommands, useProjectCommands } from '../../../store/projectCommands';
 
 const CATEGORIES = [
   { id: 'read', label: 'Leer y buscar', hint: 'Leer archivos, listar, buscar texto y ver la estructura del código.', tools: 'read_file · list_files · find_files · search · outline' },
@@ -37,6 +39,10 @@ const POLICY_OPTIONS = [
 ];
 
 export function AgentPage() {
+  const root = useAppStore((state) => state.workspaceRoot);
+  const projects = useProjectCommands((state) => state.projects);
+  const removeCommand = useProjectCommands((state) => state.remove);
+  const savedCommands = projectCommands(root, projects);
   const {
     chatMode, setChatMode,
     toolPolicy, setToolPolicy, commandAllowlist, setCommandAllowlist,
@@ -47,7 +53,7 @@ export function AgentPage() {
 
   return (
     <div className="spage">
-      <PageHead icon={IconShield} title="Agente y permisos" sub="Decide qué puede hacer el agente de Lixbon sin preguntarte." />
+      <PageHead icon={IconShield} title="Agentes y permisos" sub="Valen para el modo Agente, el editor y los intentos del ADE" />
 
       <section className="ssec rise rise--1">
         <SectionHead label="Comportamiento" />
@@ -55,7 +61,7 @@ export function AgentPage() {
           <div className="srow">
             <div className="srow__text">
               <span className="srow__label">Modo por defecto</span>
-              <span className="srow__hint">Con el que empieza cada conversación. En el chat se alterna con Shift+Tab o Ctrl+.</span>
+              <span className="srow__hint">Lo que el agente hace sin preguntarte</span>
             </div>
             <Segmented width={96} value={chatMode} onChange={setChatMode} options={CHAT_MODES.map((m) => ({ value: m.id, label: m.label }))} />
           </div>
@@ -74,6 +80,14 @@ export function AgentPage() {
         </div>
       </section>
 
+      <section className="ssec project-permissions">
+        <SectionHead label="Siempre en este proyecto" hint={root ? 'Comandos exactos guardados desde las tarjetas de permiso. Puedes quitarlos aquí.' : 'Abre una carpeta para ver sus permisos.'} />
+        <div className="allow__chips">
+          {savedCommands.map((command) => <span className="allow__chip mono" key={command}>{command}<button className="allow__x" aria-label={`Quitar ${command} de este proyecto`} onClick={() => removeCommand(root, command)}>×</button></span>)}
+          {root && !savedCommands.length && <span className="srow__hint">No hay permisos guardados para este proyecto.</span>}
+        </div>
+      </section>
+      <CommandAllowlist list={commandAllowlist} onChange={setCommandAllowlist} commandPolicy={toolPolicy.command || 'ask'} />
       <section className="ssec rise rise--2">
         <SectionHead label="Permisos por herramienta" hint="Afinan el preajuste de autonomía. Cambiar uno lo convierte en personalizado." />
         <div className="ssec ssec--card ssec--rows">
@@ -90,7 +104,6 @@ export function AgentPage() {
         </div>
       </section>
 
-      <CommandAllowlist list={commandAllowlist} onChange={setCommandAllowlist} commandPolicy={toolPolicy.command || 'ask'} />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 // con un proyecto de ejemplo en memoria para poder diseñar y revisar la
 // interfaz en un navegador sin compilar el backend de Rust.
 const ROOT = '/demo/orbita-web';
+window.__LIXBON_BROWSER_MOCK__ = true;
 
 const FILES = {
   'package.json': '{\n  "name": "orbita-web",\n  "private": true,\n  "scripts": { "dev": "vite", "test": "vitest" }\n}\n',
@@ -222,9 +223,9 @@ function ghMock(command) {
   return ok('');
 }
 
-// ADE (orch_query): Core simulado en el navegador. `?coremodel=v1` sirve el modelo Task/Attempt
-// (LXO-119) con 0, 1 y 3 intentos; sin él, `core_model` dice `legacy` y las lecturas vNext
-// responden `core_model_inactive`, como un Core real antes del corte (LXO-234).
+// ADE (orch_query): el navegador usa por defecto el modelo Task/Attempt actual.
+// `?coremodel=legacy` conserva el escenario anterior al corte; `?empty` conserva
+// el arranque sin selección. Estos escenarios solo existen en el adaptador DEV.
 const ADE_T0 = 1792000000000;
 const adeBrief = (task, n, status, over = {}) => ({
   created_at: ADE_T0 + n * 60000, ended_at: ['done', 'failed', 'stopped', 'exited'].includes(status) ? ADE_T0 + n * 60000 + 45000 : null,
@@ -242,10 +243,32 @@ const adeF2Task = (id, title, status, created) => ({
   branch: null, worktree: null, external: false, created_at: created, updated_at: created,
 });
 const ADE_TASKS = [adeF2Task('demo-t0', 'Sin intentos', 'starting', ADE_T0 + 3), adeF2Task('demo-t1', 'Un intento', 'done', ADE_T0 + 2), adeF2Task('demo-t3', 'Tres intentos', 'running', ADE_T0 + 1)];
+
+/** Arranque único del navegador: abre un intento que ya existe en el adaptador.
+ * No sustituye una selección guardada ni afecta a la webview nativa.
+ */
+export function initializeBrowserWorkbench(workbench) {
+  if (qs.get('coremodel') === 'legacy' || qs.has('empty') || qs.has('obra')) return;
+  const key = 'lixbon_browser_attempt_bootstrap_v1';
+  try { if (localStorage.getItem(key) === '1') return; } catch { /* almacenamiento no disponible */ }
+  const state = workbench.getState();
+  if (!state.adeSelection?.projectId) {
+    const task = ADE_TASKS.find((item) => ADE_ATTEMPTS[item.id]?.some((attempt) => attempt.status === 'running'));
+    const attempt = task && ADE_ATTEMPTS[task.id].findLast((item) => item.status === 'running');
+    if (attempt) state.setAdeSelection({ projectId: 'demo-p1', taskId: task.id, attemptId: attempt.id });
+  }
+  try { localStorage.setItem(key, '1'); } catch { /* la selección sigue disponible en memoria */ }
+}
+
 function adeQuery(query, args) {
-  const vNext = qs.get('coremodel') === 'v1';
+  const vNext = qs.get('coremodel') !== 'legacy';
   const inactive = () => { throw new Error('core_model_inactive: el Core aún sirve el modelo legacy; usa tasks_by_project y task_detail'); };
   switch (query) {
+    case 'task_detail': {
+      const task = ADE_TASKS.find((item) => item.id === args.task_id);
+      if (!task || args.project_id !== 'demo-p1') throw new Error('tasks_not_found');
+      return { v: 1, task: { ...task, project_id: 'demo-p1', child_ids: [], phase: null, messages: [], cwd: null, merged: false, review: null, integration: null, failure_reason: null } };
+    }
     // LXO-135: qué ofrece cada proveedor. `?caps=bloqueado` simula un entorno bloqueado y `?caps=sondeando` el primer sondeo del Core.
     case 'provider_capabilities': {
       const ALL = ['start', 'events', 'answer', 'interrupt', 'steer', 'resume'];

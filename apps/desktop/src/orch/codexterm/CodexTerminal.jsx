@@ -9,12 +9,12 @@ import { useCodexTermStore, attachViewer, codexTermApi, ensureCodexTermEvents } 
 
 /** xterm real (se importa al montar para que las pruebas puedan inyectar otro). */
 async function makeXterm() {
-  const [{ Terminal }, { FitAddon }, { Unicode11Addon }, { FONT }, { currentXtermTheme }] = await Promise.all([
+  const [{ Terminal }, { FitAddon }, { Unicode11Addon }, { FONT, TERMINAL_FONT_SIZE }, { currentXtermTheme }] = await Promise.all([
     import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/addon-unicode11'),
     import('../../editor/TerminalPanel'), import('../../editor/xtermThemes'),
   ]);
-  await document.fonts?.load(`12.5px ${FONT}`).catch(() => {});
-  const term = new Terminal({ theme: currentXtermTheme(), fontFamily: FONT, fontSize: 12.5, lineHeight: 1.2, cursorBlink: true, cursorStyle: 'bar', scrollback: 8000, allowProposedApi: true, customGlyphs: true });
+  await document.fonts?.load(`${TERMINAL_FONT_SIZE}px ${FONT}`).catch(() => {});
+  const term = new Terminal({ theme: currentXtermTheme(), fontFamily: FONT, fontSize: TERMINAL_FONT_SIZE, lineHeight: 1.2, cursorBlink: true, cursorStyle: 'bar', scrollback: 8000, allowProposedApi: true, customGlyphs: true });
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new Unicode11Addon());
