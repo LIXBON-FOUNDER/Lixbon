@@ -1,6 +1,8 @@
 // Convención: un bloque ```file:nombre.ext. Word y Excel se generan desde
 // Markdown; el resto va tal cual.
 
+import { crearZip } from './zip';
+
 const TIPOS = {
   docx: { label: 'Word', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
   xlsx: { label: 'Excel', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
@@ -11,6 +13,10 @@ const TIPOS = {
   txt: { label: 'Texto', mime: 'text/plain' },
   json: { label: 'JSON', mime: 'application/json' },
   html: { label: 'HTML', mime: 'text/html' },
+  svg: { label: 'SVG', mime: 'image/svg+xml' },
+  ics: { label: 'Calendario', mime: 'text/calendar' },
+  vcf: { label: 'Contacto', mime: 'text/vcard' },
+  epub: { label: 'EPUB', mime: 'application/epub+zip' },
 };
 
 export function parseFileLang(className) {
@@ -51,6 +57,11 @@ export async function construirArchivo(info, contenido) {
   if (info.ext === 'xlsx') return markdownAXlsx(contenido);
   if (info.ext === 'pdf') return markdownAPdf(contenido);
   if (info.ext === 'pptx') return markdownAPptx(contenido);
+  if (info.ext === 'epub') return markdownAEpub(contenido, info.name);
+  if (info.ext === 'ics' || info.ext === 'vcf') {
+    // Los calendarios y contactos piden saltos de línea CRLF.
+    return new Blob([contenido.replace(/\r?\n/g, '\r\n')], { type: `${info.mime};charset=utf-8` });
+  }
   return new Blob([contenido], { type: `${info.mime};charset=utf-8` });
 }
 
@@ -324,20 +335,71 @@ async function markdownAXlsx(md) {
   return new Blob([out], { type: TIPOS.xlsx.mime });
 }
 
+// EPUB 3 mínimo: un capítulo por cada «# Título» del Markdown. El ZIP va sin
+// comprimir y con «mimetype» el primero, como pide el formato.
+const escHtml = (x) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function enLinea(x) {
+  return escHtml(x).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>');
+}
+function mdAXhtml(md) {
+  const out = [];
+  let lista = false;
+  for (const linea of md.split('\n')) {
+    const h = /^(#{1,4})\s+(.*)$/.exec(linea);
+    const li = /^\s*[-*]\s+(.*)$/.exec(linea);
+    if (!li && lista) { out.push('</ul>'); lista = false; }
+    if (h) out.push(`<h${h[1].length}>${enLinea(h[2])}</h${h[1].length}>`);
+    else if (li) { if (!lista) { out.push('<ul>'); lista = true; } out.push(`<li>${enLinea(li[1])}</li>`); }
+    else if (linea.trim()) out.push(`<p>${enLinea(linea.trim())}</p>`);
+  }
+  if (lista) out.push('</ul>');
+  return out.join('\n');
+}
+async function markdownAEpub(md, nombre) {
+
+  const titulo = (/^#\s+(.*)$/m.exec(md) || [])[1] || nombre.replace(/\.epub$/i, '');
+  const partes = md.split(/^(?=# )/m).map((x) => x.trim()).filter(Boolean);
+  const caps = (partes.length ? partes : [md]).map((texto, i) => ({
+    id: `c${i + 1}`, titulo: (/^#\s+(.*)$/m.exec(texto) || [])[1] || `${i + 1}`, texto,
+  }));
+  const xhtml = (c) => `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml"><head><title>${escHtml(c.titulo)}</title></head><body>${mdAXhtml(c.texto)}</body></html>`;
+  const id = `urn:uuid:${globalThis.crypto?.randomUUID?.() || Date.now()}`;
+  const lengua = document.documentElement.lang || 'es';
+  const opf = `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">${id}</dc:identifier><dc:title>${escHtml(titulo)}</dc:title><dc:language>${lengua}</dc:language><meta property="dcterms:modified">${new Date().toISOString().slice(0, 19)}Z</meta></metadata>
+<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${caps.map((c) => `<item id="${c.id}" href="${c.id}.xhtml" media-type="application/xhtml+xml"/>`).join('')}</manifest>
+<spine>${caps.map((c) => `<itemref idref="${c.id}"/>`).join('')}</spine>
+</package>`;
+  const nav = `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>${escHtml(titulo)}</title></head><body><nav epub:type="toc"><ol>${caps.map((c) => `<li><a href="${c.id}.xhtml">${escHtml(c.titulo)}</a></li>`).join('')}</ol></nav></body></html>`;
+  const zip = crearZip([
+    { name: 'mimetype', code: 'application/epub+zip' },
+    { name: 'META-INF/container.xml', code: '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>' },
+    { name: 'OEBPS/content.opf', code: opf },
+    { name: 'OEBPS/nav.xhtml', code: nav },
+    ...caps.map((c) => ({ name: `OEBPS/${c.id}.xhtml`, code: xhtml(c) })),
+  ]);
+  return new Blob([zip], { type: TIPOS.epub.mime });
+}
+
 // Instrucciones internas: el modelo las sigue sin explicarlas. Los modelos
 // pequeños tienden a recitar el prompt, de ahí la última regla.
 export const FILE_PROMPT =
   'Eres lixbon, un asistente. Responde en el idioma del usuario, en Markdown, directo y sin preámbulos. ' +
   'Lo que sigue son reglas internas de formato: aplícalas en silencio.\n' +
-  '- Código: en un bloque ```lenguaje (por ejemplo ```python), completo y listo para usar.\n' +
+  '- Código: en un bloque ```lenguaje (por ejemplo ```python), completo y listo para usar. Si es un archivo concreto, ' +
+  'pon su ruta después del lenguaje: ```js src/carrito.js. Cambios a un archivo existente: ```diff con líneas +/-.\n' +
   '- Archivo descargable (si el usuario pide un documento, informe, hoja, presentación o PDF): escríbelo ENTERO ' +
   'en un bloque cuyo lenguaje sea file:nombre.ext, por ejemplo ```file:informe.pdf. Formatos: ' +
   '.docx y .pdf → Markdown (títulos #, listas, **negrita**, tablas); ' +
   '.pptx → una diapositiva por título "## ", con viñetas "- " debajo y, si hace falta, una línea "Notas: …"; ' +
   '.xlsx → una tabla Markdown o CSV por hoja, cada hoja precedida por "## Hoja: nombre", fórmulas tal cual (=SUMA(B2:B9)); ' +
-  '.csv, .md, .txt, .json, .html y código → el contenido tal cual. Un bloque por archivo.\n' +
+  '.epub → Markdown con un capítulo por cada "# Título"; ' +
+  '.csv, .md, .txt, .json, .html, .svg, .ics (evento de calendario), .vcf (contacto) y código → el contenido tal cual. Un bloque por archivo.\n' +
   '- Correo (si pide redactar un email): un bloque ```email con las líneas "Para: …" (si se conoce) y ' +
   '"Asunto: …", una línea en blanco y el cuerpo.\n' +
+  '- Texto para pegar en otra app (un post, una bio, un mensaje de WhatsApp, un título SEO): un bloque ```copiar ' +
+  'seguido de para qué es, por ejemplo ```copiar Biografía para Instagram, con solo el texto dentro.\n' +
   '- Imágenes: muéstralas con ![descripción](url) usando SOLO URLs que aparezcan como "Imagen:" en los ' +
   'resultados de búsqueda. Nunca inventes una URL; si no hay ninguna, dilo en una frase y sugiere activar la búsqueda web.\n' +
   '- Fuera de los bloques, una o dos frases como mucho; no repitas el contenido.\n' +

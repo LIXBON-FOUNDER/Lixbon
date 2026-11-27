@@ -137,7 +137,8 @@ function UltimaRespuesta({ turno, tu }) {
   );
 }
 
-export function ContextoUso({ uso }) {
+// `extra`: bloques propios de la pantalla (Coding: sesión, turno y procesos).
+export function ContextoUso({ uso, extra = null }) {
   const t = useT('chat');
   const tu = useT('cupo');
   const { user } = useAuth();
@@ -218,6 +219,7 @@ export function ContextoUso({ uso }) {
             )}
           </header>
           {uso && <Contexto uso={{ ...uso, total: totalCtx }} tu={tu} />}
+          {extra}
           {uso?.turno && <UltimaRespuesta turno={uso.turno} tu={tu} />}
           {cupos?.session && (
             <section className="ctx-pop__bloque">

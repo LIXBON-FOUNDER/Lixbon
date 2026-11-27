@@ -83,6 +83,15 @@ class RemoteHub:
         ch = self._channels.get(session_id)
         if ch is None:
             ch = RemoteChannel(session_id=session_id, user_id=user_id)
+            # Tras reiniciar el gateway el canal es nuevo: los seq siguen desde
+            # el último guardado. Si volvieran a 1, el transcript se mezclaría
+            # (se ordena por seq) y la web descartaría los eventos nuevos como
+            # ya vistos (seq <= lastSeq).
+            try:
+                from core.persistence.queries import max_remote_event_seq
+                ch.last_seq = max_remote_event_seq(session_id)
+            except Exception:  # sin BD (tests del hub): empieza en 0
+                pass
             self._channels[session_id] = ch
         return ch
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -74,6 +75,25 @@ func (c *Client) RemoteQR(ctx context.Context, data string) (string, error) {
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	return string(raw), err
+}
+
+// CodingHostReply es lo que el gateway le devuelve al host de una sesión de
+// Coding: los mensajes que esperaban a que el entorno estuviera listo y, si se
+// pidió, el PR abierto.
+type CodingHostReply struct {
+	Pending json.RawMessage `json:"pending"`
+	PR      *struct {
+		URL    string `json:"url"`
+		Number int    `json:"number"`
+	} `json:"pr"`
+}
+
+// CodingHost informa del estado del entorno de Coding (clonando, activa,
+// error), de la rama de trabajo, o pide el PR. Solo con el token del contenedor.
+func (c *Client) CodingHost(ctx context.Context, sessionID string, payload map[string]any) (CodingHostReply, error) {
+	var out CodingHostReply
+	err := c.doJSON(ctx, http.MethodPost, c.Server+"/api/coding/sessions/"+sessionID+"/host", payload, 60*time.Second, true, &out)
+	return out, err
 }
 
 type commandStream struct {

@@ -65,11 +65,15 @@ export async function describirImagen(base64) {
   return descripcion;
 }
 
-export async function subirDocumento(file) {
+// onProgress(0–100) mientras sube: cada adjunto muestra su propio porcentaje.
+export async function subirDocumento(file, onProgress) {
   const fd = new FormData();
   fd.append('file', file);
   const res = await api.post('/api/attachments', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onProgress
+      ? (e) => { if (e.total) onProgress(Math.min(99, Math.round((e.loaded / e.total) * 100))); }
+      : undefined,
   });
   return res.data;
 }

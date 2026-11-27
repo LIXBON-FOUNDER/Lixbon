@@ -9,6 +9,7 @@ import { useCierreAnimado } from '../hooks/useCierreAnimado';
 import { Muescas, ritmoSemana } from '../components/ContextoUso';
 import { useLocale } from '../i18n/LocaleContext';
 import { useT } from '../i18n/useT';
+import { Rombos } from '../components/Pulido';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { AVATAR_ACCEPT, validateAvatar, initialOf } from '../lib/avatar';
@@ -451,8 +452,8 @@ function SeguridadSection({ plan, keys, onReloadKeys, onPedirLogout }) {
           <span className="card__muted">
             {t('profile.activeKeysOf', { active: activeKeys.length, max: unlimited(plan.max_api_keys) ? t('profile.unlimitedKeys') : plan.max_api_keys })}
           </span>
-          <button className="pill-btn pill-btn--primary set-btn" onClick={createKey} disabled={busy}>
-            {t('profile.newKey')}
+          <button className={`pill-btn pill-btn--primary set-btn ${busy ? 'is-esperando' : ''}`} onClick={createKey} disabled={busy} aria-busy={busy}>
+            {busy && <Rombos />}{t('profile.newKey')}
           </button>
         </div>
 
@@ -614,8 +615,8 @@ function PrivacySection({ user, onUserChange, onLogout }) {
       <div className="set-card">
         <h2 className="set-title">{t('privacy.dataTitle')}</h2>
         <Row label={t('privacy.exportData')} hint={t('privacy.exportDataHint')}>
-          <button className="pill-btn pill-btn--outline set-btn" onClick={exportData} disabled={exporting}>
-            {exporting ? t('privacy.preparing') : t('privacy.export')}
+          <button className={`pill-btn pill-btn--outline set-btn ${exporting ? 'is-esperando' : ''}`} onClick={exportData} disabled={exporting} aria-busy={exporting}>
+            {exporting && <Rombos />}{exporting ? t('privacy.preparing').replace(/…$/, '') : t('privacy.export')}
           </button>
         </Row>
       </div>

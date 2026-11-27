@@ -1,23 +1,109 @@
 /* Markdown del chat: bloques de código con colores de sintaxis, tablas GFM.
    Va después de chat.css (lo importa Markdown.jsx) y solo afina lo suyo. */
 
+/* ── Botones pequeños de las piezas (Copiar, Abrir en Gmail, Ver más) ───── */
+.md-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--ink-soft);
+  font: 500 14px var(--font-ui); text-decoration: none; white-space: nowrap; cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.md-btn:hover { background: rgba(var(--ink-rgb), 0.08); color: var(--ink); }
+.md-btn--sec { background: rgba(var(--ink-rgb), 0.08); color: var(--ink); }
+.md-btn--sec:hover { background: rgba(var(--ink-rgb), 0.14); }
+.md-btn--icono { width: 30px; padding: 0; justify-content: center; }
+.md-btn.is-hecho, .md-btn.is-hecho:hover { color: var(--ok); }
+
 /* ── Bloque de código ────────────────────────────────────────────────────
-   Una sola superficie: la cabecera ya no lleva raya debajo (las tarjetas
-   van sin rayas) y el lenguaje se lee como etiqueta, no como título. */
-.md .md-code { margin: 14px 0; border-radius: var(--radius-box, var(--radius)); background: var(--code-bg); }
+   Sube un tono sobre el panel (antes se hundía), cabecera de otro tono con
+   el lenguaje en su color, el archivo y «Copiar» con texto. Números de línea
+   tenues; los largos se pliegan a 12 líneas. */
+.md .md-code {
+  margin: 4px 0 16px; border-radius: 12px; background: var(--code-bg); overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme="light"] .md .md-code { box-shadow: 0 1px 2px rgba(23, 20, 14, 0.06); }
 .md .md-code__head {
-  padding: 8px 8px 0 16px; border-bottom: 0;
-  font: 500 12px var(--font-ui); letter-spacing: 0.01em; color: var(--ink-muted); text-transform: lowercase;
+  display: flex; align-items: center; justify-content: flex-start; gap: 12px;
+  height: 44px; padding: 0 8px 0 16px; border-bottom: 0; background: var(--code-head);
+  font: 400 13px var(--font-ui); letter-spacing: 0; text-transform: none; color: var(--ink-muted);
+}
+.md-code__lang { display: inline-flex; align-items: center; gap: 8px; flex: none; font-weight: 500; color: var(--ink); }
+.md-code__lang i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.md-code__archivo, .md-code__meta { min-width: 0; overflow: hidden; white-space: nowrap; color: var(--ink-muted); }
+.md-code__meta { color: var(--ink-faint); }
+.md .md-code__actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+.md-code__cuerpo { display: flex; align-items: flex-start; overflow-x: auto; }
+.md-code__margen {
+  flex: none; padding: 14px 14px 16px 16px; min-width: 2ch; text-align: right; white-space: pre;
+  font: 400 14px/1.7 var(--font-mono); color: var(--code-gutter); user-select: none;
 }
 .md .md-code pre {
-  margin: 0; padding: 10px 16px 14px; background: none;
-  font-size: 13px; line-height: 1.65; tab-size: 2;
+  flex: 1; min-width: 0; margin: 0; padding: 14px 16px 16px 0; background: none; border-radius: 0; overflow: visible;
+  font-size: 14px; line-height: 1.7; tab-size: 2;
 }
 .md .md-code pre code { font-size: 1em; line-height: inherit; color: var(--code-ink); }
+.md-code.is-plegado .md-code__cuerpo { max-height: calc(var(--plegado) * 1.7em + 14px); overflow: hidden; font-size: 14px; }
+.md-code__mas {
+  position: relative; display: flex; justify-content: center; padding: 6px 0 12px;
+}
+.md-code.is-plegado .md-code__mas { margin-top: -44px; padding-top: 30px; background: linear-gradient(transparent, var(--code-bg) 55%); }
+/* Terminal: más oscuro y un «$» verde delante de cada orden. */
+.md .md-code--term { background: #0B0B0B; }
+.md .md-code--term .md-code__head { background: #141414; }
+.md-code--term .md-code__margen { color: var(--accent-fill); }
+:root[data-theme="light"] .md .md-code--term { background: #1A1814; }
+:root[data-theme="light"] .md .md-code--term .md-code__head { background: #24211B; }
+:root[data-theme="light"] .md .md-code--term .md-code__lang,
+:root[data-theme="light"] .md .md-code--term pre code { color: #F2EEE4; }
+:root[data-theme="light"] .md .md-code--term .md-btn { color: #CFC8B8; }
+/* Cambios: la línea entera tintada de verde o rojo. */
+.md-code--diff .hljs-addition, .md-code--diff .hljs-deletion { display: inline-block; width: 100%; margin-right: -16px; padding-right: 16px; }
+.md-code--diff .hljs-addition { background: rgba(93, 187, 124, 0.11); color: var(--code-ink) !important; }
+.md-code--diff .hljs-deletion { background: rgba(224, 104, 58, 0.10); color: var(--code-ink) !important; }
+
+/* ── Correo redactado ───────────────────────────────────────────────────── */
+.md .md-correo { margin: 4px 0 16px; border-radius: 12px; background: var(--surface-3); overflow: hidden; }
+.md .md-correo__head { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-bottom: 0; background: var(--surface-4); }
+.md-correo__titulo { display: inline-flex; align-items: center; gap: 8px; font: 500 14px var(--font-ui); color: var(--ink); }
+.md-correo__titulo .ico { color: var(--info); }
+.md-correo__campos { display: flex; flex-direction: column; margin: 0; padding: 6px 16px 0; }
+.md-correo__campos div { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--linea); font: 400 14px var(--font-ui); }
+.md-correo__campos dt { color: var(--ink-faint); }
+.md-correo__campos dd { margin: 0; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.md .md-correo__cuerpo { padding: 14px 16px 6px; white-space: pre-wrap; font: 400 16px/1.65 var(--font-text); color: var(--ink-body); }
+.md .md-correo__cuerpo p { margin: 0 0 12px; white-space: pre-wrap; }
+.md a.md-btn, .md a.md-btn:hover { text-decoration: none; }
+.md-correo__pie { display: flex; align-items: center; gap: 12px; padding: 0 8px 10px 16px; font: 400 13px var(--font-ui); color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.md-correo__pie .md-btn { margin-left: auto; }
+
+/* ── Texto para copiar ──────────────────────────────────────────────────── */
+.md-copia { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 16px; padding: 12px 12px 14px 16px; border-radius: 12px; background: var(--surface-3); }
+.md-copia__cab { display: flex; align-items: center; gap: 8px; font: 500 13px var(--font-ui); color: var(--ink-muted); }
+.md-copia__cab .md-btn { margin-left: auto; background: rgba(var(--ink-rgb), 0.08); color: var(--ink); }
+.md-copia__cab .md-btn.is-hecho { background: none; color: var(--ok); }
+.md-copia__txt { white-space: pre-wrap; font: 400 16px/1.6 var(--font-text); color: var(--ink); }
+.md-copia__pie { font: 400 13px var(--font-ui); color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.md-copia__pie.is-pasado { color: var(--danger-ink); }
+
+/* ── Archivos ───────────────────────────────────────────────────────────── */
+.md .filecard { max-width: none; margin: 4px 0 16px; border-radius: 12px; background: var(--surface-3); }
+.md .filecard__head { gap: 14px; padding: 12px; }
+.md .filecard__abrir { background: rgba(var(--ink-rgb), 0.08); }
+.md .filecard__abrir:hover { background: rgba(var(--ink-rgb), 0.14); }
+.md .filecard__name { text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent); }
+.filecard__info.is-error { color: var(--danger-ink); }
+.filecard.is-creando .filecard__rombos { margin-right: 8px; color: var(--ink-muted); }
+.filegrupo {
+  display: flex; align-items: center; gap: 10px; margin: -4px 0 16px; padding: 8px 8px 8px 14px;
+  border-radius: 12px; background: var(--surface-2); font: 500 14px var(--font-ui); color: var(--ink-soft);
+}
+.filegrupo .pill-btn { margin-left: auto; }
 
 /* ── Tablas ──────────────────────────────────────────────────────────── */
 .md-tabla { margin: 14px 0; overflow-x: auto; border-radius: var(--radius-box, var(--radius)); background: var(--bg-card); }
-.md-tabla table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.5; }
+.md-tabla table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.5; }
 .md-tabla th, .md-tabla td { padding: 9px 14px; text-align: left; vertical-align: top; }
 .md-tabla th { background: rgba(var(--ink-rgb), 0.05); color: var(--ink); font-weight: 600; white-space: nowrap; }
 .md-tabla td { color: var(--ink-body); }
@@ -26,23 +112,26 @@
 .md input[type="checkbox"] { margin: 0 6px 0 0; vertical-align: -1px; accent-color: var(--accent); }
 .md del { color: var(--ink-muted); }
 
-/* ── Colores de sintaxis (highlight.js) ───────────────────────────────── */
+/* ── Colores de sintaxis (highlight.js) ───────────────────────────────────
+   La paleta de estados: lila las palabras clave, azul las funciones, el
+   verde de marca para el texto entre comillas, ámbar los números. */
 .md {
-  --hl-keyword: #C8A2F5;
-  --hl-string: #A8D49B;
-  --hl-number: #F2B67C;
-  --hl-title: #8DB7F7;
-  --hl-attr: #E8C77A;
-  --hl-tag: #F0928A;
-  --hl-comment: var(--ink-muted);
+  --hl-keyword: #C9A6F5;
+  --hl-string: #C3D467;
+  --hl-number: #F0B86E;
+  --hl-title: #7DB2FF;
+  --hl-attr: #E5B467;
+  --hl-tag: #F29A78;
+  --hl-comment: #8C8C8C;
 }
 :root[data-theme="light"] .md {
-  --hl-keyword: #7A3FC0;
-  --hl-string: #3B7A2A;
-  --hl-number: #A65A12;
-  --hl-title: #2458B3;
-  --hl-attr: #8A6A00;
-  --hl-tag: #B23A2E;
+  --hl-keyword: #7B3FC4;
+  --hl-string: #4D6B0E;
+  --hl-number: #A35A00;
+  --hl-title: #1F5FBF;
+  --hl-attr: #8A5300;
+  --hl-tag: #B23C17;
+  --hl-comment: #7A7262;
 }
 .md .hljs-keyword, .md .hljs-selector-tag, .md .hljs-built_in, .md .hljs-type, .md .hljs-meta .hljs-keyword { color: var(--hl-keyword); }
 .md .hljs-string, .md .hljs-regexp, .md .hljs-template-string, .md .hljs-addition { color: var(--hl-string); }

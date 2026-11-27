@@ -6,8 +6,8 @@ import (
 )
 
 func TestCatalogIsConsistent(t *testing.T) {
-	if got := len(Names()); got != 34 {
-		t.Fatalf("herramientas: %d, esperaba 34", got)
+	if got := len(Names()); got != 35 {
+		t.Fatalf("herramientas: %d, esperaba 35", got)
 	}
 	schemaNames := map[string]bool{}
 	for _, schema := range Schemas() {
@@ -22,7 +22,7 @@ func TestCatalogIsConsistent(t *testing.T) {
 			t.Errorf("%s es de solo lectura y mutante a la vez", name)
 		}
 	}
-	if len(schemaNames) != 34 {
+	if len(schemaNames) != 35 {
 		t.Errorf("schemas distintos: %d", len(schemaNames))
 	}
 }

@@ -1,0 +1,11 @@
+^http://host\.docker\.internal:8000/
+^(https?://)?github\.com(:443)?(/|$)
+^(https?://)?api\.github\.com(:443)?(/|$)
+^(https?://)?codeload\.github\.com(:443)?(/|$)
+^(https?://)?objects\.githubusercontent\.com(:443)?(/|$)
+^(https?://)?registry\.npmjs\.org(:443)?(/|$)
+^(https?://)?registry\.yarnpkg\.com(:443)?(/|$)
+^(https?://)?pypi\.org(:443)?(/|$)
+^(https?://)?files\.pythonhosted\.org(:443)?(/|$)
+^(https?://)?proxy\.golang\.org(:443)?(/|$)
+^(https?://)?sum\.golang\.org(:443)?(/|$)

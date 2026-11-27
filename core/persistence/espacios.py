@@ -374,6 +374,18 @@ def asignar_conversacion(uid: int, conversation_id: str, espacio_id: str) -> Non
             c.espacio_id = espacio_id
 
 
+def mover_conversacion(uid: int, conversation_id: str, espacio_id: str | None) -> bool:
+    """Mueve la conversación a otro espacio (o la saca con None) desde la barra."""
+    with get_session() as s:
+        if espacio_id:
+            _propio(s, espacio_id, uid)
+        c = s.get(Conversation, conversation_id)
+        if not c or c.user_id != uid:
+            return False
+        c.espacio_id = espacio_id or None
+        return True
+
+
 # ── agentes ─────────────────────────────────────────────────────────────────
 def _validar_agente(datos: dict[str, Any], parcial: bool = False) -> dict[str, Any]:
     v: dict[str, Any] = {}

@@ -51,7 +51,7 @@
 }
 
 .pago__nombre {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--ink);
 }
@@ -86,7 +86,7 @@
 }
 
 .pago__resumen-nombre {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--ink);
 }
 
@@ -99,13 +99,13 @@
 }
 
 .pago__resumen-nota {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-label);
   text-wrap: pretty;
 }
 
 .pago__sub {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-muted);
   text-wrap: pretty;
 }
@@ -117,7 +117,7 @@
 }
 
 .pago__label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -144,7 +144,7 @@
   border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 14px;
   transition: background 0.16s ease, color 0.16s ease;
 }
 
@@ -197,7 +197,7 @@
 
 .pago-tarjeta__num {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink);
 }
 
@@ -206,7 +206,7 @@
   border-radius: var(--radius-chip);
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .pago-tarjeta__chip.is-mala {
@@ -216,7 +216,7 @@
 
 .pago-tarjeta__pie {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -236,7 +236,7 @@
 }
 
 .pago__cargando {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-muted);
 }
 
@@ -245,7 +245,7 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-soft);
   text-wrap: pretty;
 }
@@ -295,7 +295,7 @@
   border-radius: var(--radius);
   background: var(--primary);
   color: var(--on-primary);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   transition: opacity 0.16s ease;
@@ -316,7 +316,7 @@
   border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--ink-body);
-  font-size: 13px;
+  font-size: 14px;
   text-decoration: none;
   cursor: pointer;
   transition: background 0.16s ease;
@@ -341,7 +341,7 @@
   border-radius: var(--radius);
   background: var(--field-error);
   color: var(--danger-ink);
-  font-size: 13px;
+  font-size: 14px;
   text-wrap: pretty;
 }
 
@@ -351,7 +351,7 @@
   justify-content: center;
   gap: 8px;
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
   text-wrap: pretty;
 }
@@ -388,7 +388,7 @@
 }
 
 .pago__titular {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 500;
   color: var(--ink);
 }
@@ -408,7 +408,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 11px 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .pago__detalle > div + div {
@@ -444,7 +444,7 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-body);
 }
 
@@ -472,7 +472,7 @@
 }
 
 .pago-pack__nombre {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -484,7 +484,7 @@
 }
 
 .pago-pack__nota {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-label);
 }
 
@@ -507,13 +507,13 @@
 }
 
 .pago-saldo__enlace {
-  font-size: 13px;
+  font-size: 14px;
   text-decoration: none;
 }
 
 .pago-monto {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-body);
 }
 

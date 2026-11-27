@@ -1,0 +1,261 @@
+/* Pulido visual (tableros «Pulido visual · chat y Coding», 2026-11-12).
+   Va después del resto de hojas globales y antes de motion.css. Las piezas que
+   viven en hojas que se cargan con su página (markdown, contexto, coding…)
+   se pulen en su propia hoja. */
+
+/* ── Rombos: el indicador de espera ───────────────────────────────────────
+   Cuatro rombos pequeños en forma de rombo que se encienden en ola. Toman el
+   color del texto del botón. */
+.rombos { position: relative; display: inline-block; flex: none; width: 14px; height: 14px; }
+.rombos i {
+  position: absolute; width: 4.5px; height: 4.5px; border-radius: 1.2px;
+  background: currentColor; transform: rotate(45deg); opacity: 0.22;
+  animation: rombos-ola 1.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.rombos i:nth-child(1) { left: 4.75px; top: 0; }
+.rombos i:nth-child(2) { left: 9.5px; top: 4.75px; animation-delay: 0.3s; }
+.rombos i:nth-child(3) { left: 4.75px; top: 9.5px; animation-delay: 0.6s; }
+.rombos i:nth-child(4) { left: 0; top: 4.75px; animation-delay: 0.9s; }
+@keyframes rombos-ola { 0%, 100% { opacity: 0.22; } 30% { opacity: 1; } 60% { opacity: 0.22; } }
+
+/* ── Botones ─────────────────────────────────────────────────────────────
+   Verde de marca para la acción que hace avanzar; verde de «hecho» para el
+   resultado («Conectado», «Guardado»), sin check. */
+.pill-btn--marca { background: var(--accent-fill); color: var(--on-accent-fill); font-weight: 500; }
+.pill-btn--marca:hover:not(:disabled) { background: var(--accent-fill-hover); }
+.pill-btn--ok, .pill-btn--ok:hover:not(:disabled) { background: var(--ok-soft); color: var(--ok); }
+.pill-btn--chico { height: 30px; padding: 0 12px; font-size: 14px; gap: 6px; }
+/* Esperando: gerundio + rombos pegados al texto, y un brillo que cruza el
+   botón. No acepta otro clic (aria-busy + disabled en el componente). */
+.pill-btn.is-esperando,
+.chip-btn.is-esperando { position: relative; overflow: hidden; isolation: isolate; cursor: progress; }
+.pill-btn.is-esperando:disabled { cursor: progress; }
+.pill-btn--primary.is-esperando:disabled { background: var(--primary); color: var(--on-primary); }
+.pill-btn--marca.is-esperando:disabled { background: var(--accent-fill); color: var(--on-accent-fill); }
+.pill-btn--outline.is-esperando:disabled { background: var(--surface-3); color: var(--ink-soft); }
+.pill-btn.is-danger.is-esperando:disabled { background: var(--danger-soft); color: var(--danger-ink); }
+.pill-btn.is-esperando::after {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(100deg, transparent 30%, rgba(var(--ink-rgb), 0.08) 50%, transparent 70%);
+  background-size: 250% 100%;
+  animation: brillo-boton 1.8s linear infinite;
+}
+@keyframes brillo-boton { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.tarda { display: inline-flex; align-items: center; gap: 12px; font-size: 14px; color: var(--ink-muted); white-space: nowrap; }
+
+/* ── Avisos con color ────────────────────────────────────────────────────
+   Fondo tintado del color del estado sobre la superficie, icono en un cuadro
+   de su color, título + una línea y las acciones a la derecha. */
+.aviso {
+  --c: var(--info); --cs: var(--info-soft);
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 12px 12px 14px; border-radius: 12px;
+  background: linear-gradient(var(--cs), var(--cs)), var(--surface-3);
+  font-family: var(--font-ui);
+}
+.aviso--ok { --c: var(--ok); --cs: var(--ok-soft); }
+.aviso--warn { --c: var(--warn); --cs: var(--warn-soft); }
+.aviso--mal { --c: var(--danger-ink); --cs: var(--danger-soft); }
+.aviso--marca { --c: var(--accent-fill); --cs: var(--accent-tinte); }
+:root[data-theme="light"] .aviso--marca { --c: var(--accent); }
+.aviso__ico { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px; background: var(--cs); color: var(--c); }
+.aviso__t { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.aviso__t strong { font-size: 15px; font-weight: 500; color: var(--ink); }
+.aviso__t span { font-size: 14px; line-height: 1.45; color: var(--ink-soft); }
+.aviso__acc { display: flex; align-items: center; gap: 6px; flex: none; }
+.aviso__acc .pill-btn { height: 30px; padding: 0 12px; font-size: 14px; }
+.aviso__acc .pill-btn--outline { background: rgba(var(--ink-rgb), 0.08); color: var(--ink); }
+.aviso__acc .pill-btn--outline:hover:not(:disabled) { background: rgba(var(--ink-rgb), 0.14); }
+.aviso__acc .pill-btn--ghost { background: none; color: var(--ink-soft); }
+.aviso__acc .pill-btn--ghost:hover:not(:disabled) { background: rgba(var(--ink-rgb), 0.08); color: var(--ink); }
+@media (max-width: 640px) {
+  .aviso { flex-wrap: wrap; }
+  .aviso__acc { width: 100%; justify-content: flex-end; }
+}
+
+.pill-btn--icono { width: 30px; padding: 0; }
+.aviso-cuota-nuevo { margin-bottom: 8px; }
+
+/* Cupo agotado (en el hilo, en lugar de la respuesta). */
+.cupo-lleno {
+  display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 12px;
+  background: linear-gradient(var(--warn-soft), var(--warn-soft)), var(--surface-3); font-family: var(--font-ui);
+  --c: var(--warn); --cs: var(--warn-soft);
+}
+.cupo-lleno__fila { display: flex; align-items: center; gap: 14px; }
+.cupo-lleno__barra { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; }
+.cupo-lleno__barra i { height: 8px; border-radius: 2px; background: var(--warn); }
+.cupo-lleno__datos { display: flex; gap: 18px; font-size: 13px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.cupo-lleno__datos b { font-weight: 500; color: var(--ink); }
+.cupo-lleno__acc { display: flex; gap: 8px; flex-wrap: wrap; }
+.cupo-lleno .pill-btn--outline { background: rgba(var(--ink-rgb), 0.08); color: var(--ink); }
+
+/* Botón fantasma genérico (Cancelar, Detalles, Rechazar…). */
+.pill-btn--ghost { background: none; color: var(--ink-soft); }
+.pill-btn--ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); }
+
+/* ── Texto que no cabe ───────────────────────────────────────────────────
+   Sin «…»: solo cuando no cabe, el final se funde justo antes de su icono.
+   El nombre completo sale en un globo a su lado, en una línea. */
+.recorte { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; }
+.recorte.is-corta {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+}
+.globo {
+  position: fixed; z-index: 1000; pointer-events: none;
+  max-width: min(520px, calc(100vw - 32px)); padding: 7px 10px; border-radius: 8px;
+  background: var(--pop); box-shadow: var(--sombra-menu);
+  font: 400 14px/1.4 var(--font-ui); color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: clip;
+  animation: globo-entra 0.14s ease-out;
+}
+.globo--lado { transform: translateY(-50%); }
+@keyframes globo-entra { from { opacity: 0; } }
+
+/* ── Caja del chat ───────────────────────────────────────────────────────
+   Con texto: un halo verde muy tenue y «Enviar» en verde. */
+.chat-input.has-texto .chat-input__box {
+  box-shadow: 0 0 0 1px rgba(180, 198, 78, 0.35), 0 10px 30px -12px rgba(0, 0, 0, 0.6);
+}
+:root[data-theme="light"] .chat-input.has-texto .chat-input__box {
+  box-shadow: 0 0 0 1px rgba(76, 90, 16, 0.3), 0 10px 30px -14px rgba(23, 20, 14, 0.25);
+}
+.chat-input.has-texto .chat-input__send:not(:disabled):not(.is-stop) { background: var(--accent-fill); color: var(--on-accent-fill); }
+.chat-input.has-texto .chat-input__send:hover:not(:disabled):not(.is-stop) { background: var(--accent-fill-hover); }
+.chat-input__send { overflow: hidden; }
+.chat-input__send.is-volando .ico { animation: enviar-vuela 0.32s ease-in-out; }
+@keyframes enviar-vuela {
+  0% { transform: translateY(0); opacity: 1; }
+  45% { transform: translateY(-20px); opacity: 0; }
+  46% { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* Adjuntos en una sola fila (lo que no cabe se funde); cada uno con su
+   estado: subiendo (atenuado + rombos + %) o con error (rojo + Reintentar). */
+.chat-input__chips {
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+}
+.chat-input__chips::-webkit-scrollbar { display: none; }
+.attach-chip {
+  position: relative; flex: none; max-width: 260px; gap: 10px;
+  padding: 6px 8px 6px 6px; border-radius: 10px; background: var(--surface-4); color: var(--ink);
+}
+.attach-chip__media { position: relative; display: grid; place-items: center; flex: none; }
+.attach-chip__thumb { width: 40px !important; height: 40px !important; border-radius: 8px !important; object-fit: cover; }
+.attach-chip__doc {
+  position: relative; display: flex; align-items: flex-end; justify-content: center;
+  width: 30px; height: 36px; padding-bottom: 4px; box-sizing: border-box; border-radius: 5px 9px 5px 5px;
+  background: var(--c, #7C7C7C); color: #fff; font: 600 8px/1 var(--font-ui); letter-spacing: 0.04em;
+}
+.attach-chip__doc::after { content: ""; position: absolute; top: 0; right: 0; width: 9px; height: 9px; border-radius: 0 8px 0 3px; background: rgba(255, 255, 255, 0.35); }
+.attach-chip__txt { display: flex; flex-direction: column; min-width: 0; font: 500 14px/1.3 var(--font-ui); }
+.attach-chip__txt small { font-size: 13px; font-weight: 400; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.attach-chip.is-loading .attach-chip__thumb,
+.attach-chip.is-loading .attach-chip__doc { filter: saturate(0.35) brightness(0.6); }
+.attach-chip.is-loading .attach-chip__media .rombos { position: absolute; color: #fff; }
+.attach-chip.is-loading small { color: var(--ink-soft); }
+.attach-chip.is-loading::after { display: none !important; }
+.attach-chip.is-error { background: linear-gradient(var(--danger-soft), var(--danger-soft)), var(--surface-4); }
+.attach-chip.is-error small { color: var(--danger-ink); }
+.attach-chip__x { flex: none; }
+
+/* Arrastrando un archivo: la caja se tiñe de verde con un filo. */
+.chat-drop {
+  background: linear-gradient(var(--accent-tinte), var(--accent-tinte)), var(--surface-3) !important;
+  box-shadow: inset 0 0 0 2px rgba(180, 198, 78, 0.55);
+  border-radius: inherit;
+}
+.chat-drop__caja { color: var(--accent-fill); }
+:root[data-theme="light"] .chat-drop__caja { color: var(--accent); }
+
+/* ── Tile de documento: el color y el icono de su tipo ─────────────────── */
+.doc-tile {
+  position: relative; display: flex; align-items: flex-end; justify-content: center; flex: none;
+  width: 40px; height: 48px; padding-bottom: 6px; box-sizing: border-box; border-radius: 6px 12px 6px 6px;
+  background: var(--c, #7C7C7C); color: #fff;
+}
+.doc-tile::after { content: ""; position: absolute; top: 0; right: 0; width: 12px; height: 12px; border-radius: 0 10px 0 4px; background: rgba(255, 255, 255, 0.35); }
+.doc-tile .ico { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); }
+.doc-tile b { font: 600 10px/1 var(--font-ui); letter-spacing: 0.04em; }
+.doc-tile--s { width: 30px; height: 36px; padding-bottom: 0; border-radius: 5px 9px 5px 5px; }
+.doc-tile--s::after { width: 9px; height: 9px; }
+.doc-tile--s .ico { top: 50%; transform: translate(-50%, -50%); }
+.doc-tile.is-creando { background: var(--surface-5); color: var(--ink-muted); overflow: hidden; }
+.doc-tile.is-creando::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.18) 50%, transparent 70%);
+  background-size: 220% 100%; animation: brillo-boton 1.4s linear infinite;
+}
+
+/* ── Menús y ventanas que se despegan ────────────────────────────────────
+   Dos tonos por encima del panel, con filo de luz y sombra. */
+.modelo-menu__panel, .modelo-menu__sub, .ctx-pop, .select-menu, .sb-menu, .sb-cuenta, .cd-opciones, .lang-switch__menu, .chat-cmds {
+  background: var(--pop) !important;
+  box-shadow: var(--sombra-menu);
+}
+.modal { box-shadow: var(--sombra-menu), 0 30px 80px rgba(0, 0, 0, 0.45); }
+:root[data-theme="light"] .modal { box-shadow: var(--sombra-menu), 0 30px 80px rgba(23, 20, 14, 0.18); }
+.modelo-menu__bloque, .ctx-pop__bloque { background: var(--pop-in) !important; }
+.modelo-menu__opt:hover, .modelo-menu__opt:focus-visible, .modelo-menu__opt.is-active { background: rgba(var(--ink-rgb), 0.07); }
+/* El elegido se marca solo con el tinte verde (sin check, que desalineaba). */
+.modelo-menu__opt.is-sel, .modelo-menu__opt.is-sel:hover { background: var(--accent-tinte); color: var(--ink); }
+/* Aparecen desde su botón: 4 px y 97 % de su tamaño, 160 ms. */
+@keyframes select-in { from { opacity: 0; transform: translateY(4px) scale(0.97); } }
+.modelo-menu__panel.is-abajo { transform-origin: top right; }
+.modelo-menu__panel.is-arriba, .ctx-pop { transform-origin: bottom right; }
+
+/* ── Imagen generándose ──────────────────────────────────────────────────
+   Mancha de color que se aclara, trama que se retira de arriba abajo,
+   fase + porcentaje en una chapa y la barra verde debajo. */
+.gen-img { display: flex; flex-direction: column; gap: 10px; width: min(360px, 100%); font-family: var(--font-ui); }
+.gen-img__lienzo { position: relative; aspect-ratio: var(--ratio, 1 / 1); max-height: 420px; border-radius: 12px; overflow: hidden; background: #1B1B1B; }
+.gen-img__mancha {
+  position: absolute; inset: -20%;
+  background:
+    radial-gradient(circle at 70% 30%, rgba(255, 214, 150, 0.85), transparent 30%),
+    radial-gradient(circle at 25% 70%, rgba(134, 201, 160, 0.6), transparent 40%),
+    linear-gradient(160deg, #2C3A5C, #6A4A6E 45%, #C98A5C 70%, #26314A);
+  transition: filter 0.4s linear, opacity 0.4s linear;
+}
+.gen-img__trama {
+  position: absolute; inset: 0;
+  background: repeating-conic-gradient(rgba(255, 255, 255, 0.07) 0 25%, transparent 0 50%) 0 0 / 16px 16px, rgba(32, 32, 32, 0.85);
+  -webkit-mask-image: linear-gradient(180deg, transparent var(--retira), #000 calc(var(--retira) + 6%));
+  mask-image: linear-gradient(180deg, transparent var(--retira), #000 calc(var(--retira) + 6%));
+}
+.gen-img__chapa {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 10px; background: rgba(14, 14, 14, 0.72); backdrop-filter: blur(8px);
+  font-size: 13px; font-weight: 500; color: #fff;
+}
+.gen-img__chapa b { margin-left: auto; font-size: 15px; font-weight: 500; color: var(--accent-fill); font-variant-numeric: tabular-nums; }
+.gen-img__barra { height: 4px; border-radius: 4px; background: rgba(var(--ink-rgb), 0.1); overflow: hidden; }
+.gen-img__barra i { display: block; width: var(--p); height: 100%; border-radius: 4px; background: var(--accent-fill); transition: width 0.25s linear; }
+.gen-img__pie { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.gen-img__pie .pill-btn { margin-left: auto; }
+
+/* ── Saludo ──────────────────────────────────────────────────────────────── */
+.chat-hero__sub {
+  margin: -6px 0 0; text-align: center;
+  font: 400 15px var(--font-ui); color: var(--ink-muted);
+}
+.chat-hero__sub button {
+  padding: 0; border: 0; background: none; font: inherit; color: var(--ink-soft); cursor: pointer;
+  text-decoration: underline; text-decoration-color: rgba(var(--ink-rgb), 0.3); text-underline-offset: 3px;
+}
+.chat-hero__sub button:hover { color: var(--ink); }
+
+/* Los avisos se despliegan en su sitio (220 ms), sin empujar de golpe. */
+.aviso, .cupo-lleno { animation: aviso-abre 0.22s cubic-bezier(0.2, 0.7, 0.2, 1); }
+@keyframes aviso-abre { from { opacity: 0; clip-path: inset(0 0 100% 0 round 12px); } to { opacity: 1; clip-path: inset(0 0 0 0 round 12px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .aviso, .cupo-lleno,
+  .rombos i, .pill-btn.is-esperando::after, .chat-input__send.is-volando .ico, .globo { animation: none; }
+  .rombos i { opacity: 0.7; }
+}
+.attach-chip.is-loading .doc-tile .ico { opacity: 0; }
+.cd-aviso { animation: aviso-abre 0.22s cubic-bezier(0.2, 0.7, 0.2, 1); }
+@media (prefers-reduced-motion: reduce) { .cd-aviso { animation: none; } }

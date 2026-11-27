@@ -52,6 +52,12 @@ func launchArgs(opts Options) []string {
 	} else {
 		args = append(args, "--start-maximized")
 	}
+	// Dentro del entorno aislado de Coding (contenedor sin root ni user
+	// namespaces) el sandbox de Chromium no puede arrancar; el aislamiento ya
+	// lo da el contenedor. Solo con la variable explícita de la imagen.
+	if os.Getenv("LIXBON_BROWSER_NO_SANDBOX") == "1" {
+		args = append(args, "--no-sandbox", "--disable-dev-shm-usage")
+	}
 	return append(args, "about:blank")
 }
 

@@ -23,10 +23,10 @@
 
 .settings__title { font-size: 38px; line-height: 1.1; }
 /* Secciones de Ajustes: es un modal, van en la letra de la interfaz. */
-.set-title { font-family: var(--font-ui); font-size: 17px; font-weight: 500; letter-spacing: 0; line-height: 1.3; }
+.set-title { font-family: var(--font-ui); font-size: 18px; font-weight: 500; letter-spacing: 0; line-height: 1.3; }
 .auth__title { font-size: 34px; line-height: 1.1; }
 /* Las ventanas no llevan serifa: solo titulares de marca, saludos y secciones. */
-.modal__title { font-family: var(--font-ui); font-size: 17px; font-weight: 500; letter-spacing: 0; line-height: 1.3; }
+.modal__title { font-family: var(--font-ui); font-size: 18px; font-weight: 500; letter-spacing: 0; line-height: 1.3; }
 .shared__title { font-size: 32px; line-height: 1.12; }
 .remote__title { font-size: 22px; }
 .remote__empty-title { font-size: 30px; line-height: 1.12; }
@@ -35,8 +35,8 @@
    la interfaz, con un salto claro sobre el cuerpo (15px) por tamaño y peso. */
 .md h1, .md h2, .md h3, .md h4 { font-family: var(--font-ui); font-weight: 600; letter-spacing: -0.005em; }
 .md h1 { font-size: 20px; line-height: 1.3; }
-.md h2 { font-size: 17px; line-height: 1.35; }
-.md h3, .md h4 { font-size: 15px; line-height: 1.4; }
+.md h2 { font-size: 18px; line-height: 1.35; }
+.md h3, .md h4 { font-size: 16px; line-height: 1.4; }
 
 @media (max-width: 640px) {
   .chat-hero__title, .vis-hero__title { font-size: 34px; }

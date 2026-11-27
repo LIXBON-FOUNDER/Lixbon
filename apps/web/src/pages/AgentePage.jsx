@@ -13,6 +13,7 @@ import { Icono, IconMenu } from '../components/Icons';
 import { Markdown } from '../components/Markdown';
 import { Baldosa, Estado, VentanaAgente, useFechaCorta, useHorario } from '../components/Espacios';
 import { borrarAgente, editarAgente, ejecutarAgente, errorDe, leerAgente, leerEjecucion } from '../lib/espacios';
+import { api } from '../lib/api';
 import '../styles/espacios.css';
 
 const REFRESCO = 3000;
@@ -33,11 +34,18 @@ function Bloque({ icono, titulo, items }) {
   );
 }
 
-function Resumen({ ejecucionId }) {
+function Resumen({ ejecucionId, anterior = null, onReintentar, reintentando }) {
   const t = useT('espacios');
   const fecha = useFechaCorta();
   const [x, setX] = useState(null);
   const [copiado, setCopiado] = useState(false);
+  const [comparar, setComparar] = useState(false);
+  const [prev, setPrev] = useState(null);
+  const [resuelta, setResuelta] = useState(false);
+  useEffect(() => {
+    if (!comparar || !anterior || prev?.id === anterior) return;
+    leerEjecucion(anterior).then(setPrev).catch(() => {});
+  }, [comparar, anterior, prev]);
   useEffect(() => {
     let vivo = true;
     setX(null);
@@ -49,12 +57,65 @@ function Resumen({ ejecucionId }) {
   const copiar = async () => {
     try { await navigator.clipboard.writeText(x.resultado); setCopiado(true); setTimeout(() => setCopiado(false), 1500); } catch { /* sin permiso */ }
   };
+  const ap = x.aprobacion; // { id, session_id, command, repo, branch } en ejecuciones de Coding
+  const resolver = async (si) => {
+    try {
+      await api.post(`/api/remote/sessions/${ap.session_id}/commands`, { type: 'approve', id: ap.id, decision: si ? 'allow' : 'deny' });
+      setResuelta(true);
+    } catch { /* la sesión ya no espera */ }
+  };
+  const lineas = (e) => [...(e?.resumen?.hizo || []).slice(0, 3)];
   return (
     <div className="esp-resumen">
       <p className="esp-resumen__etq">{t('summary', { cuando: fecha(x.inicio).toLowerCase() })}</p>
+      {x.estado === 'espera' && ap && !resuelta && (
+        <div className="gh-confirma" role="group" aria-label={t('needsCommand')}>
+          <div className="gh-confirma__cab">
+            <span className="gh-confirma__icono"><Icono nombre="terminal" size={16} /></span>
+            <div className="gh-confirma__titulos">
+              <strong>{t('needsCommand')}</strong>
+              {ap.repo && <span>{ap.repo}{ap.branch && <> · <code className="gh-confirma__rama">{ap.branch}</code></>}</span>}
+            </div>
+            <span className="estado estado--espera">{t('state_espera')}</span>
+          </div>
+          {ap.command && <p className="gh-confirma__commit">{ap.command}</p>}
+          <div className="gh-confirma__acciones">
+            <button type="button" className="pill-btn pill-btn--outline" onClick={() => resolver(false)}>{t('reject')}</button>
+            <button type="button" className="pill-btn pill-btn--primary" onClick={() => resolver(true)}>{t('accept')}</button>
+          </div>
+        </div>
+      )}
+      <div className="nv-acc-fila">
+        {x.session_id && <Link className="pill-btn pill-btn--outline" to={`/coding?s=${x.session_id}`}>{t('openSession')}</Link>}
+        {x.estado !== 'curso' && (
+          <button type="button" className="pill-btn pill-btn--outline" onClick={onReintentar} disabled={reintentando}>{t('retryRun')}</button>
+        )}
+        {anterior && (
+          <button type="button" className={`pill-btn pill-btn--outline ${comparar ? 'is-on' : ''}`} aria-pressed={comparar}
+            onClick={() => setComparar((v) => !v)}>{t('compareWithPrevious')}</button>
+        )}
+      </div>
       {x.estado === 'error' && (
         <section className="esp-bloque"><h3><Icono nombre="fallo" size={16} />{t('state_error')}</h3>
           <p className="esp-carta__texto" style={{ WebkitLineClamp: 'unset' }}>{x.error}</p></section>
+      )}
+      {comparar && prev && (
+        <section className="esp-bloque">
+          <h3><Icono nombre="dividir" size={16} />{t('versus', { cuando: fecha(prev.inicio).toLowerCase() })}</h3>
+          <div className="nv-comparar">
+            <div>
+              <small>{fecha(prev.inicio)}</small>
+              {lineas(prev).map((l, i) => <span key={i}>{l}</span>)}
+              {prev.tokens > 0 && <span>{t('tokensK', { n: Math.round(prev.tokens / 1000) })}</span>}
+            </div>
+            <div>
+              <small>{fecha(x.inicio)}</small>
+              {lineas(x).map((l, i) => <span key={i}>{lineas(prev).includes(l) ? l : <ins>{l}</ins>}</span>)}
+              {lineas(prev).filter((l) => !lineas(x).includes(l)).map((l, i) => <span key={`d${i}`}><del>{l}</del></span>)}
+              {x.tokens > 0 && <span>{t('tokensK', { n: Math.round(x.tokens / 1000) })}</span>}
+            </div>
+          </div>
+        </section>
       )}
       <Bloque icono="completado" titulo={t('did')} items={r.hizo} />
       <Bloque icono="alerta" titulo={t('keepInMind')} items={r.tener_en_cuenta} />
@@ -74,6 +135,11 @@ function Resumen({ ejecucionId }) {
   );
 }
 
+// Las que esperan una aprobación van arriba; el resto, de la más nueva a la más vieja.
+function ordenarEjecuciones(lista) {
+  return [...lista].sort((a, b) => (b.estado === 'espera') - (a.estado === 'espera'));
+}
+
 export default function AgentePage() {
   const t = useT('espacios');
   const tch = useT('chat');
@@ -89,6 +155,7 @@ export default function AgentePage() {
   const [editar, setEditar] = useState(false);
   const [error, setError] = useState('');
   const [lanzando, setLanzando] = useState(false);
+  const [filtro, setFiltro] = useState('todas');
   useSeo({ title: ag?.nombre || t('seoTitle'), noindex: true });
 
   const cargar = useCallback(() => leerAgente(id).then((d) => {
@@ -141,6 +208,12 @@ export default function AgentePage() {
     return <section className="chat-main int-page">{cabecera()}<div className="int-cuerpo"><p className="int-vacio">{ag === null ? t('loadError') : t('loading')}</p></div></section>;
   }
 
+  const visibles = ordenarEjecuciones(ag.ejecuciones).filter((x) => filtro === 'todas'
+    || (filtro === 'espera' && x.estado === 'espera') || (filtro === 'error' && x.estado === 'error'));
+  const anteriorDe = (id) => {
+    const i = ag.ejecuciones.findIndex((x) => x.id === id);
+    return ag.ejecuciones.slice(i + 1).find((x) => x.estado === 'hecho' || x.estado === 'espera')?.id || null;
+  };
   const proxima = ag.proxima_at && new Date(ag.proxima_at).toLocaleString(locale, { weekday: 'long', hour: '2-digit', minute: '2-digit' });
   const btn = (icono, etiqueta, onClick) => (
     <button type="button" className="icon-btn" onClick={onClick} aria-label={etiqueta} title={etiqueta}><Icono nombre={icono} size={16} /></button>
@@ -171,10 +244,21 @@ export default function AgentePage() {
             {error && <p className="esp-error" role="alert">{error}</p>}
 
             <section className="esp-seccion">
-              <div className="esp-seccion__cab"><h2>{t('runs')}</h2></div>
+              <div className="esp-seccion__cab">
+                <h2>{t('runs')}</h2>
+                {ag.ejecuciones.length > 0 && (
+                  <span className="cd-seg" role="group" aria-label={t('filterRuns')}>
+                    {[['todas', 'filterAll'], ['espera', 'state_espera'], ['error', 'filterFailed']].map(([id, k]) => (
+                      <button key={id} type="button" className={filtro === id ? 'is-on' : ''} aria-pressed={filtro === id}
+                        onClick={() => setFiltro(id)}>{t(k)}</button>
+                    ))}
+                  </span>
+                )}
+              </div>
               {!ag.ejecuciones.length && <p className="esp-vacio">{t('noRuns')}</p>}
+              {ag.ejecuciones.length > 0 && !visibles.length && <p className="esp-vacio">{t('noRunsFilter')}</p>}
               <div className="esp-pila">
-                {ag.ejecuciones.map((x) => (
+                {visibles.map((x) => (
                   <button key={x.id} type="button" className={`esp-tarjeta esp-tarjeta--compacta ${sel === x.id ? 'is-sel' : ''}`}
                     onClick={() => x.estado !== 'curso' && setSel(x.id)} aria-pressed={sel === x.id}>
                     <Baldosa icono="historial" />
@@ -184,7 +268,9 @@ export default function AgentePage() {
                         {x.estado === 'curso' ? t('running') : x.estado === 'error' ? x.error : (x.resumen?.hizo?.[0] || '')}
                       </span>
                     </span>
-                    <span className="esp-tarjeta__dato">{duracion(t, x)}</span>
+                    <span className="esp-tarjeta__dato">
+                      {[duracion(t, x), x.tokens > 0 && t('tokensK', { n: Math.round(x.tokens / 1000) })].filter(Boolean).join(' · ')}
+                    </span>
                     <Estado estado={x.estado} />
                   </button>
                 ))}
@@ -192,7 +278,7 @@ export default function AgentePage() {
             </section>
           </div>
 
-          <aside>{sel && <Resumen key={sel} ejecucionId={sel} />}</aside>
+          <aside>{sel && <Resumen key={sel} ejecucionId={sel} anterior={anteriorDe(sel)} onReintentar={ejecutar} reintentando={trabajando || lanzando} />}</aside>
         </div>
       </div>
 

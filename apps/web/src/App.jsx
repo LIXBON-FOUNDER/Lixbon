@@ -56,7 +56,7 @@ const ADMIN = [AdminLayout, AdminInicio, AdminUsuarios, AdminModelos, AdminRoles
 const POR_SECCION = {
   chat: [AppShell, ChatPage], c: [AppShell, ChatPage], guides: [GuiasPage], visuals: [AppShell, VisualsPage], integraciones: [AppShell, IntegracionesPage], espacios: [AppShell, EspaciosPage], agentes: [AppShell, AgentePage], auth: [AuthPage],
   'reset-password': [ResetPasswordPage], account: [AccountPage], plans: [PlansPage], admin: ADMIN,
-  skills: [SkillsPage], apps: [DownloadsPage], status: [StatusPage], docs: [DocsPage], remote: [AppShell, RemotePage], s: [SharedPage, SharedVisualPage],
+  skills: [SkillsPage], apps: [DownloadsPage], status: [StatusPage], docs: [DocsPage], remote: [AppShell, RemotePage], coding: [AppShell, RemotePage], s: [SharedPage, SharedVisualPage],
 };
 
 // La página de la URL de entrada se carga antes de montar para pintar sin hueco
@@ -96,6 +96,7 @@ function LocalizedRoutes() {
         <Route path="/espacios" element={<EspaciosPage />} />
         <Route path="/espacios/:id" element={<EspaciosPage />} />
         <Route path="/agentes/:id" element={<AgentePage />} />
+        <Route path="/coding" element={<RemotePage />} />
         <Route path="/remote" element={<RemotePage />} />
         <Route path="/remote/:token" element={<RemotePage />} />
       </Route>

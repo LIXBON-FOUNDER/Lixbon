@@ -38,14 +38,16 @@ export default defineConfig({
   // y permiso para servir esa carpeta en desarrollo.
   resolve: { dedupe: ['react', 'react-dom'] },
   server: {
+    host: '127.0.0.1',
+    port: 5173,
     fs: { allow: ['.', '../../shared'] },
     proxy: {
       // Mismo origen vía proxy para que la cookie de sesión funcione sin CORS.
-      '/api': 'http://localhost:8000',
-      '/v1': 'http://localhost:8000',
-      '/mcp': 'http://localhost:8000',
+      '/api': 'http://127.0.0.1:8000',
+      '/v1': 'http://127.0.0.1:8000',
+      '/mcp': 'http://127.0.0.1:8000',
       // El login del CLI y del escritorio (/ide/connect) lo sirve el gateway.
-      '/ide': 'http://localhost:8000',
+      '/ide': 'http://127.0.0.1:8000',
     },
   },
 })

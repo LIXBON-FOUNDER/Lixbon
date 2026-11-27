@@ -21,6 +21,7 @@ import './styles/remote.css';
 import './styles/mascota.css';
 import './styles/titulares.css';
 import '@lixbon/icons/css';
+import './styles/pulido.css';
 // El último: solo añade movimiento a lo anterior (ver motion.css).
 import './styles/motion.css';
 

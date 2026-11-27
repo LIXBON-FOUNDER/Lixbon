@@ -5,7 +5,7 @@ import { useT } from '../i18n/useT';
 import { Link } from '../i18n/link';
 import { useAuth } from '../hooks/useAuth';
 import { cuando } from '../lib/cuando';
-import { IconAlert } from './Icons';
+import { Icono } from './Icons';
 import '../styles/cupo.css';
 
 const CLAVE_CERRADOS = 'lixbon.cupo.cerrados';
@@ -40,24 +40,34 @@ function cuandoVuelve(t, resetAt, idioma) {
     : t('resetsDay', { when: cuando(resetAt, idioma), dia: fecha.toLocaleDateString(idioma, { weekday: 'long', day: 'numeric', month: 'long' }) });
 }
 
-/** En el hilo, en lugar de la respuesta que no se pudo generar. */
+/** En el hilo, en lugar de la respuesta que no se pudo generar: tintado de
+ *  ámbar, con la barra llena por segmentos, cuándo se renueva y las salidas. */
 export function CupoAgotado({ aviso }) {
   const t = useT('cupo');
   const { user } = useAuth();
   const idioma = document.documentElement.lang || 'es';
   const semana = aviso.scope === 'week';
   const plan = user?.plan_name || t('planFallback');
+  const falta = aviso.reset_at ? Math.max(0, new Date(aviso.reset_at) - Date.now()) : 0;
+  const dias = Math.floor(falta / 86400000);
+  const horas = Math.floor((falta % 86400000) / 3600000);
   return (
-    <div className="cupo-tarjeta" role="status">
-      <div className="cupo-tarjeta__cab">
-        <IconAlert size={16} />
-        <strong>{semana ? t('weekTitle') : t('sessionTitle')}</strong>
+    <div className="cupo-lleno" role="status">
+      <div className="cupo-lleno__fila">
+        <span className="aviso__ico"><Icono nombre="uso" size={20} /></span>
+        <div className="aviso__t">
+          <strong>{semana ? t('weekTitle') : t('sessionTitle')}</strong>
+          <span>{semana ? t('weekText', { plan }) : t('sessionText', { plan })} {cuandoVuelve(t, aviso.reset_at, idioma)}</span>
+        </div>
       </div>
-      <p className="cupo-tarjeta__texto">
-        {semana ? t('weekText', { plan }) : t('sessionText', { plan })} {cuandoVuelve(t, aviso.reset_at, idioma)}
-      </p>
-      <div className="cupo-tarjeta__acciones">
-        <Link to="/plans" className="pill-btn pill-btn--primary">{t('seePlans')}</Link>
+      <div className="cupo-lleno__barra" aria-hidden="true">{Array.from({ length: 20 }, (_, k) => <i key={k} />)}</div>
+      <div className="cupo-lleno__datos">
+        <span>{t('usedLabel')} <b>100 %</b></span>
+        {falta > 0 && <span>{t('renewsIn')} <b>{dias ? t('daysHours', { d: dias, h: horas }) : t('hoursOnly', { h: Math.max(1, horas) })}</b></span>}
+      </div>
+      <div className="cupo-lleno__acc">
+        <Link to="/plans" className="pill-btn pill-btn--marca">{t('upgradePlan')}</Link>
+        <Link to="/account/usage" className="pill-btn pill-btn--outline">{t('seeUsage')}</Link>
       </div>
     </div>
   );
